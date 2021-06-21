@@ -1,0 +1,16 @@
+query StakingData {
+  bestChain(query: {canonical: true}, maxLength: 1) {
+    protocolState {
+      consensusState {
+        stakingEpochData {
+          seed
+          ledger {
+            totalCurrency
+            hash
+          }
+        }
+        epoch
+      }
+    }
+  }
+}

@@ -1,7 +1,17 @@
 use clap::Clap;
-use graphql_client::{GraphQLQuery, Response};
+use graphql_client::*;
 use reqwest;
 use std::error::Error;
+use MacTypes_sys::{UInt32, UInt64};
+
+// The paths are relative to the directory where your `Cargo.toml` is located.
+// Both json and the GraphQL schema language are supported as sources for the schema
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "contrib/schema.graphql",
+    query_path = "contrib/query.graphql"
+)]
+pub struct StakingData;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
