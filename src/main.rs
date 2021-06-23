@@ -8,7 +8,7 @@ use MacTypes_sys::{UInt32, UInt64};
 // Both json and the GraphQL schema language are supported as sources for the schema
 #[derive(GraphQLQuery)]
 #[graphql(
-    schema_path = "contrib/schema.graphql",
+    schema_path = "contrib/regen_schema.graphql",
     query_path = "contrib/query.graphql"
 )]
 pub struct StakingData;
