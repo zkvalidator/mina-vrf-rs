@@ -24,6 +24,8 @@ struct Opts {
 enum SubCommand {
     /// Generate a key pair
     Keygen(KeygenOpts),
+    /// Query StakingData
+    GetStakingData(GetStakingDataOpts),
 }
 
 /// A subcommand for generating key pair
@@ -37,6 +39,18 @@ struct KeygenOpts {
     prvkey: String,
 }
 
+/// A subcommand for generating key pair
+#[derive(Clap)]
+struct GetStakingDataOpts {
+    /// Graphql endpoint URL
+    #[clap(
+        short = "e",
+        long = "endpoint",
+        default_value = "http://localhost:3085/graphql"
+    )]
+    endpoint: String,
+}
+
 fn main() {
     ::std::env::set_var("RUST_LOG", "info");
     env_logger::init();
@@ -46,9 +60,16 @@ fn main() {
         SubCommand::Keygen(o) => {
             key_gen(o);
         }
+        SubCommand::GetStakingData(o) => {
+            get_staking_data(o);
+        }
     }
 }
 
 fn key_gen(opts: KeygenOpts) {
+    unimplemented!()
+}
+
+fn get_staking_data(opts: GetStakingDataOpts) {
     unimplemented!()
 }
