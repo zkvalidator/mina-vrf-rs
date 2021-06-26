@@ -1,8 +1,11 @@
 use clap::Clap;
 use graphql_client::*;
 use reqwest;
-// use std::error::Error;
-use MacTypes_sys::{UInt32, UInt64};
+// use anyhow::{anyhow, Error};
+
+// TODO: inplement these type (ser, deser, from...)
+type UInt32 = String;
+type UInt64 = String;
 
 // The paths are relative to the directory where your `Cargo.toml` is located.
 // Both json and the GraphQL schema language are supported as sources for the schema
@@ -68,10 +71,12 @@ async fn main() {
     }
 }
 
+// TODO: error handling
 async fn key_gen(_opts: KeygenOpts) {
     unimplemented!()
 }
 
+// TODO: error handling
 async fn get_staking_data(opts: GetStakingDataOpts) {
     let request_body = StakingData::build_query(staking_data::Variables {});
 
