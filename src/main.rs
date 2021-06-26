@@ -54,7 +54,7 @@ struct GetStakingDataOpts {
 
 #[tokio::main]
 async fn main() {
-    ::std::env::set_var("RUST_LOG", "info");
+    dotenv::dotenv().ok();
     env_logger::init();
 
     let opts: Opts = Opts::parse();

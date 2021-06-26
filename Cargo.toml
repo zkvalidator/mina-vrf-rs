@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 MacTypes-sys = "2.1.0"
 clap = { package = "clap-v3", version = "3.0.0-beta.1" }  # todo: replace with official v3 when it's released to crates.io
+dotenv = "0.15.0"
 env_logger = "0.5"
 graphql_client = "0.9.0"
 log = "0.4"
