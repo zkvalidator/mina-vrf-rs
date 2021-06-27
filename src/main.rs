@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Clap;
 use graphql_client::*;
 
@@ -99,11 +99,11 @@ async fn get_staking_data(opts: GetStakingDataOpts) -> Result<()> {
     }
 
     let best_chain = match &response_body.data {
-        None => return Err(anyhow!("response_body data is empty")),
+        None => bail!("response_body data is empty"),
         Some(data) => match &data.best_chain {
-            None => return Err(anyhow!("best_chain is None")),
+            None => bail!("best_chain is None"),
             Some(best_chain) => match best_chain.len() == 1 {
-                false => return Err(anyhow!("should only have 1 best_chain")),
+                false => bail!("should only have 1 best_chain"),
                 true => &best_chain[0],
             },
         },
