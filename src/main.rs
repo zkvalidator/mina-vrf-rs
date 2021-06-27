@@ -1,7 +1,6 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Clap;
 use graphql_client::*;
-use reqwest;
 
 // TODO: inplement these type (ser, deser, from...)
 type UInt32 = String;
@@ -91,8 +90,19 @@ async fn get_staking_data(opts: GetStakingDataOpts) -> Result<()> {
         .send()
         .await?;
     let response_body: Response<staking_data::ResponseData> = res.json().await?;
-
     log::debug!("{:#?}", response_body);
+    if let Some(es) = response_body.errors {
+        for e in es {
+            log::error!("{}", e);
+        }
+        return Err(anyhow!("response_body contains errors"));
+    }
+    match response_body.data {
+        None => return Err(anyhow!("response_body data is empty")),
+        Some(_data) => {
+            // TODO:
+        }
+    }
 
     Ok(())
 }
