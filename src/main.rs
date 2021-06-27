@@ -97,12 +97,10 @@ async fn get_staking_data(opts: GetStakingDataOpts) -> Result<()> {
         }
         return Err(anyhow!("response_body contains errors"));
     }
-    match response_body.data {
-        None => return Err(anyhow!("response_body data is empty")),
-        Some(_data) => {
-            // TODO:
-        }
-    }
+    let best_chain = &response_body.data.unwrap().best_chain.unwrap()[0]; // should unwrap successfully
+    let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data; 
+    let seed = &staking_epoch_data.seed;
+    let total_currency = &staking_epoch_data.ledger.total_currency;
 
     Ok(())
 }
