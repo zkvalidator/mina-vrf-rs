@@ -1,7 +1,7 @@
+use anyhow::Result;
 use clap::Clap;
 use graphql_client::*;
 use reqwest;
-// use anyhow::{anyhow, Error};
 
 // TODO: inplement these type (ser, deser, from...)
 type UInt32 = String;
@@ -62,22 +62,26 @@ async fn main() {
 
     let opts: Opts = Opts::parse();
     match opts.command {
-        SubCommand::Keygen(o) => {
-            key_gen(o).await;
-        }
-        SubCommand::GetStakingData(o) => {
-            get_staking_data(o).await;
-        }
+        SubCommand::Keygen(o) => match key_gen(o).await {
+            Err(e) => log::error!("{}", e),
+            _ => {
+                log::info!("keygen successfully!");
+            }
+        },
+        SubCommand::GetStakingData(o) => match get_staking_data(o).await {
+            Err(e) => log::error!("{}", e),
+            _ => {
+                log::info!("query successfully!");
+            }
+        },
     }
 }
 
-// TODO: error handling
-async fn key_gen(_opts: KeygenOpts) {
+async fn key_gen(_opts: KeygenOpts) -> Result<()> {
     unimplemented!()
 }
 
-// TODO: error handling
-async fn get_staking_data(opts: GetStakingDataOpts) {
+async fn get_staking_data(opts: GetStakingDataOpts) -> Result<()> {
     let request_body = StakingData::build_query(staking_data::Variables {});
 
     let client = reqwest::Client::new();
@@ -85,9 +89,10 @@ async fn get_staking_data(opts: GetStakingDataOpts) {
         .post(opts.endpoint)
         .json(&request_body)
         .send()
-        .await
-        .unwrap();
-    let response_body: Response<staking_data::ResponseData> = res.json().await.unwrap();
+        .await?;
+    let response_body: Response<staking_data::ResponseData> = res.json().await?;
 
     log::debug!("{:#?}", response_body);
+
+    Ok(())
 }
