@@ -52,6 +52,9 @@ struct GetStakingDataOpts {
         default_value = "http://localhost:3085/graphql"
     )]
     endpoint: String,
+    /// User public key string
+    #[clap(short = "p", long = "pub")]
+    pubkey: String,
 }
 
 #[tokio::main]
