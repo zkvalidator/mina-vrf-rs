@@ -193,16 +193,36 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
     let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
     let epoch = &best_chain.protocol_state.consensus_state.epoch;
     let (seed, total_currency, delegators_indices) = if epoch != &opts.epoch.to_string() {
-        let url = format!(
-            "https://raw.githubusercontent.com/zkvalidator/mina-vrf-rs/main/epochs/{}.json",
-            opts.epoch
-        );
-        let request_body = StakingData::build_query(staking_data::Variables {});
-        let data: staking_data::ResponseData =
+        let request_body = StakingDataExplorer::build_query(staking_data_explorer::Variables {
+            epoch: epoch.parse::<i64>()?,
+        });
+        let data: staking_data_explorer::ResponseData =
             graphql_query(MINA_EXPLORER_ENDPOINT, &request_body).await?;
 
+        let url = format!(
+            "https://raw.githubusercontent.com/zkvalidator/mina-vrf-rs/kobigurk/workflow/data/epochs/{}.json",
+            data.blocks[0]
+                .as_ref()
+                .ok_or(anyhow!("no block"))?
+                .protocol_state
+                .as_ref()
+                .ok_or(anyhow!("no protocol state"))?
+                .consensus_state
+                .as_ref()
+                .ok_or(anyhow!("no consensus state"))?
+                .staking_epoch_data
+                .as_ref()
+                .ok_or(anyhow!("no staking epoch data"))?
+                .ledger
+                .as_ref()
+                .ok_or(anyhow!("no ledger"))?
+                .hash
+                .as_ref()
+                .ok_or(anyhow!("no hash"))?
+        );
+
         let ledger: Vec<LedgerAccountJson> =
-            serde_json::from_slice(&reqwest::get(url).await?.bytes().await?.to_vec()).unwrap();
+            serde_json::from_slice(&reqwest::get(url).await?.bytes().await?.to_vec())?;
 
         let delegators: HashMap<String, i64> = ledger
             .iter()
@@ -243,8 +263,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         .protocol_state
         .consensus_state
         .slot_since_genesis
-        .parse::<usize>()
-        .unwrap();
+        .parse::<usize>()?;
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
         (NUM_SLOTS_IN_EPOCH * (opts.epoch + 1) - 1),
@@ -268,7 +287,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         .collect::<Vec<_>>();
 
     for request in requests {
-        println!("{}", serde_json::to_string(&request).unwrap());
+        println!("{}", serde_json::to_string(&request)?);
     }
 
     Ok(())
@@ -304,8 +323,8 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
     let seed = &staking_epoch_data.seed;
     let total_currency = {
-        let mut currency = Decimal::from_str(&staking_epoch_data.ledger.total_currency).unwrap();
-        currency.set_scale(DIGITS_AFTER_DECIMAL_POINT).unwrap();
+        let mut currency = Decimal::from_str(&staking_epoch_data.ledger.total_currency)?;
+        currency.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
         currency
     };
 
@@ -340,7 +359,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     let deserializer = serde_json::Deserializer::from_reader(stdin);
     let iterator = deserializer.into_iter::<BatchPatchWitnessSingleRequest>();
     for item in iterator {
-        let mut patched = item.unwrap();
+        let mut patched = item?;
         let mut balance = Decimal::from_str(
             &delegators
                 .iter()
@@ -348,9 +367,8 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
                 .unwrap()
                 .balance
                 .total,
-        )
-        .unwrap();
-        balance.set_scale(DIGITS_AFTER_DECIMAL_POINT).unwrap();
+        )?;
+        balance.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
         patched.vrf_threshold = Some(BatchPatchWitnessSingleVrfThresholdRequest {
             delegated_stake: balance.to_string(),
             total_stake: total_currency.to_string(),
@@ -424,12 +442,15 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let iterator = deserializer.into_iter::<BatchCheckWitnessSingleRequest>();
     let mut slot_to_vrf_results: HashMap<String, Vec<_>> = HashMap::new();
     for item in iterator {
-        let e = item.unwrap();
+        let e = item?;
         let slot = e.message.global_slot.clone();
         if !slot_to_vrf_results.contains_key(&slot) {
             slot_to_vrf_results.insert(slot.clone(), vec![]);
         }
-        slot_to_vrf_results.get_mut(&slot).unwrap().push(e.clone());
+        slot_to_vrf_results
+            .get_mut(&slot)
+            .ok_or(anyhow!("could not get mut"))?
+            .push(e.clone());
     }
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
@@ -437,15 +458,19 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     );
 
     let mut invalid_slots = vec![];
+    let mut local_invalid_slots = vec![];
     let mut producing_slots = vec![];
+    let mut local_producing_slots = vec![];
     for slot in first_slot_in_epoch..=last_slot_in_epoch {
         if !slot_to_vrf_results.contains_key(&slot.to_string()) {
             invalid_slots.push(slot);
+            local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
         }
         let vrf_results = &slot_to_vrf_results[&slot.to_string()];
         if vrf_results.iter().any(|v| v.threshold_met) {
-            producing_slots.push(slot - first_slot_in_epoch);
+            producing_slots.push(slot);
+            local_producing_slots.push(slot - first_slot_in_epoch);
         }
         if !delegators.iter().all(|x| {
             vrf_results
@@ -453,13 +478,15 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                 .find(|v| v.message.delegator_index == x.index.unwrap())
                 .is_some()
         }) {
-            invalid_slots.push(slot - first_slot_in_epoch);
+            invalid_slots.push(slot);
             continue;
         }
     }
 
     println!("invalid slots: {:?}", invalid_slots);
+    println!("invalid local slots: {:?}", local_invalid_slots);
     println!("producing slots: {:?}", producing_slots);
+    println!("producing local slots: {:?}", local_producing_slots);
 
     Ok(())
 }
