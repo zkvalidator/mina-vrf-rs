@@ -2,6 +2,7 @@ query StakingData {
   bestChain(query: {canonical: true}, maxLength: 1) {
     protocolState {
       consensusState {
+        slotSinceGenesis
         stakingEpochData {
           seed
           ledger {
@@ -11,6 +12,18 @@ query StakingData {
         }
         epoch
       }
+    }
+  }
+}
+
+query Account($public_key: String!) {
+  account(query: {canonical: true}, publicKey: $public_key) {
+    delegators {
+        publicKey
+        balance {
+            total
+        }
+        index
     }
   }
 }
