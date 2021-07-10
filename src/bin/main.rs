@@ -192,7 +192,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
     };
     let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
     let epoch = &best_chain.protocol_state.consensus_state.epoch;
-    let (seed, total_currency, delegators_indices) = if epoch != &opts.epoch.to_string() {
+    let (_, _, delegators_indices) = if epoch != &opts.epoch.to_string() {
         let request_body = StakingDataExplorer::build_query(staking_data_explorer::Variables {
             epoch: epoch.parse::<i64>()?,
         });
@@ -259,11 +259,6 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         (seed, total_currency, delegators)
     };
 
-    let slot = best_chain
-        .protocol_state
-        .consensus_state
-        .slot_since_genesis
-        .parse::<usize>()?;
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
         (NUM_SLOTS_IN_EPOCH * (opts.epoch + 1) - 1),
@@ -321,7 +316,6 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
         },
     };
     let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
-    let seed = &staking_epoch_data.seed;
     let total_currency = {
         let mut currency = Decimal::from_str(&staking_epoch_data.ledger.total_currency)?;
         currency.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
@@ -380,36 +374,6 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
 }
 
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
-    let request_body = StakingData::build_query(staking_data::Variables {});
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(&opts.endpoint)
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: Response<staking_data::ResponseData> = res.json().await?;
-    if let Some(es) = response_body.errors {
-        for e in es {
-            log::error!("{}", e);
-        }
-        return Err(anyhow!("response_body contains errors"));
-    }
-
-    let best_chain = match &response_body.data {
-        None => bail!("response_body data is empty"),
-        Some(data) => match &data.best_chain {
-            None => bail!("best_chain is None"),
-            Some(best_chain) => match best_chain.len() == 1 {
-                false => bail!("should only have 1 best_chain"),
-                true => &best_chain[0],
-            },
-        },
-    };
-    let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
-    let seed = &staking_epoch_data.seed;
-    let total_currency = &staking_epoch_data.ledger.total_currency;
-
     let request_body = Account::build_query(account::Variables {
         public_key: opts.pubkey,
     });
