@@ -16,14 +16,3 @@ query StakingData {
   }
 }
 
-query Account($public_key: String!) {
-  account(query: {canonical: true}, publicKey: $public_key) {
-    delegators {
-        publicKey
-        balance {
-            total
-        }
-        index
-    }
-  }
-}

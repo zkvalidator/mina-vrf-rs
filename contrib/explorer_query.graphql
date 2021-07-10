@@ -3,6 +3,7 @@ query StakingDataExplorer($epoch: Int!) {
     protocolState {
       consensusState {
         stakingEpochData {
+          seed
           ledger {
             hash
             totalCurrency
