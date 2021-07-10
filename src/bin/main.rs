@@ -8,10 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 
-// TODO: inplement these type (ser, deser, from...)
 type UInt32 = String;
 type UInt64 = String;
-type PublicKey = String;
 
 const NUM_SLOTS_IN_EPOCH: usize = 7140;
 const DIGITS_AFTER_DECIMAL_POINT: u32 = 9;
@@ -26,14 +24,6 @@ const MINA_EXPLORER_ENDPOINT: &str = "https://graphql.minaexplorer.com";
     response_derives = "Debug,Serialize,PartialEq"
 )]
 pub struct StakingData;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "contrib/regen_schema.graphql",
-    query_path = "contrib/query.graphql",
-    response_derives = "Debug,Serialize,PartialEq"
-)]
-pub struct Account;
 
 #[derive(GraphQLQuery)]
 #[graphql(
@@ -134,6 +124,14 @@ struct LedgerAccountJson {
     delegate: String,
 }
 
+struct LedgerAccount {
+    #[allow(unused)]
+    pk: String,
+    balance: String,
+    delegate: String,
+    index: i64,
+}
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
@@ -179,9 +177,12 @@ async fn graphql_query<U: IntoUrl, B: Serialize + ?Sized, R: DeserializeOwned>(
     response_body.data.ok_or(anyhow!("response_body was none"))
 }
 
-async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
+async fn get_staking_data(
+    endpoint: &str,
+    epoch: i64,
+) -> Result<(String, String, String, Vec<LedgerAccount>)> {
     let request_body = StakingData::build_query(staking_data::Variables {});
-    let data: staking_data::ResponseData = graphql_query(&opts.endpoint, &request_body).await?;
+    let data: staking_data::ResponseData = graphql_query(endpoint, &request_body).await?;
 
     let best_chain = match &data.best_chain {
         None => bail!("best_chain is None"),
@@ -190,74 +191,81 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
             true => &best_chain[0],
         },
     };
-    let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
-    let epoch = &best_chain.protocol_state.consensus_state.epoch;
-    let (_, _, delegators_indices) = if epoch != &opts.epoch.to_string() {
-        let request_body = StakingDataExplorer::build_query(staking_data_explorer::Variables {
-            epoch: epoch.parse::<i64>()?,
-        });
+    let best_epoch = &best_chain.protocol_state.consensus_state.epoch;
+
+    let (seed, total_currency, ledger_hash) = if best_epoch != &epoch.to_string() {
+        let request_body =
+            StakingDataExplorer::build_query(staking_data_explorer::Variables { epoch });
         let data: staking_data_explorer::ResponseData =
             graphql_query(MINA_EXPLORER_ENDPOINT, &request_body).await?;
 
-        let url = format!(
-            "https://raw.githubusercontent.com/zkvalidator/mina-vrf-rs/kobigurk/workflow/data/epochs/{}.json",
-            data.blocks[0]
-                .as_ref()
-                .ok_or(anyhow!("no block"))?
-                .protocol_state
-                .as_ref()
-                .ok_or(anyhow!("no protocol state"))?
-                .consensus_state
-                .as_ref()
-                .ok_or(anyhow!("no consensus state"))?
-                .staking_epoch_data
-                .as_ref()
-                .ok_or(anyhow!("no staking epoch data"))?
-                .ledger
-                .as_ref()
-                .ok_or(anyhow!("no ledger"))?
-                .hash
-                .as_ref()
-                .ok_or(anyhow!("no hash"))?
-        );
+        let explorer_staking_epoch_data = data.blocks[0]
+            .as_ref()
+            .ok_or(anyhow!("no block"))?
+            .protocol_state
+            .as_ref()
+            .ok_or(anyhow!("no protocol state"))?
+            .consensus_state
+            .as_ref()
+            .ok_or(anyhow!("no consensus state"))?
+            .staking_epoch_data
+            .as_ref()
+            .ok_or(anyhow!("no staking epoch data"))?;
 
-        let ledger: Vec<LedgerAccountJson> =
-            serde_json::from_slice(&reqwest::get(url).await?.bytes().await?.to_vec())?;
+        let ledger = &explorer_staking_epoch_data
+            .ledger
+            .as_ref()
+            .ok_or(anyhow!("no ledger"))?;
+        let seed = explorer_staking_epoch_data
+            .seed
+            .as_ref()
+            .ok_or(anyhow!("no seed"))?;
+        let total_currency = &ledger
+            .total_currency
+            .as_ref()
+            .ok_or(anyhow!("no total currency"))?;
+        let ledger_hash = explorer_staking_epoch_data
+            .ledger
+            .as_ref()
+            .ok_or(anyhow!("no ledger"))?
+            .hash
+            .as_ref()
+            .ok_or(anyhow!("no hash"))?;
 
-        let delegators: HashMap<String, i64> = ledger
-            .iter()
-            .enumerate()
-            .map(|(i, a)| (a.pk.clone(), i as i64))
-            .collect();
-
-        let delegators_indices = ledger
-            .iter()
-            .filter(|a| a.delegate == opts.pubkey)
-            .map(|a| delegators[&a.pk])
-            .collect::<Vec<_>>();
-
-        let seed = &staking_epoch_data.seed;
-        let total_currency = &staking_epoch_data.ledger.total_currency;
-        (seed, total_currency, delegators_indices)
+        (
+            seed.clone(),
+            total_currency.to_string(),
+            ledger_hash.clone(),
+        )
     } else {
+        let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
         let seed = &staking_epoch_data.seed;
         let total_currency = &staking_epoch_data.ledger.total_currency;
+        let ledger_hash = &staking_epoch_data.ledger.hash;
 
-        let request_body = Account::build_query(account::Variables {
-            public_key: opts.pubkey,
-        });
-
-        let data: account::ResponseData = graphql_query(&opts.endpoint, &request_body).await?;
-        let delegators = (match &data.account {
-            None => bail!("delegators is None"),
-            Some(account) => account.delegators.as_ref().unwrap(),
-        })
-        .into_iter()
-        .map(|d| d.index.unwrap())
-        .collect::<Vec<_>>();
-
-        (seed, total_currency, delegators)
+        (seed.clone(), total_currency.clone(), ledger_hash.clone())
     };
+
+    let url = format!(
+        "https://raw.githubusercontent.com/zkvalidator/mina-vrf-rs/main/data/epochs/{}.json",
+        ledger_hash,
+    );
+
+    let ledger: Vec<LedgerAccountJson> =
+        serde_json::from_slice(&reqwest::get(url).await?.bytes().await?.to_vec())?;
+
+    let delegators = extract_delegators(&ledger);
+
+    Ok((seed, total_currency, ledger_hash, delegators))
+}
+
+async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
+    let (seed, _, _, delegators) = get_staking_data(&opts.endpoint, opts.epoch as i64).await?;
+    let delegators_indices = delegators
+        .into_iter()
+        .filter(|x| x.delegate == opts.pubkey)
+        .map(|x| x.index)
+        .collect::<Vec<_>>();
 
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
@@ -270,11 +278,13 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
     );
     let requests = (first_slot_in_epoch..=last_slot_in_epoch)
         .flat_map(|slot| {
+            let local_seed = seed.clone();
+            let local_slot = slot.to_string();
             delegators_indices
                 .iter()
                 .map(move |index| BatchGenerateWitnessSingleRequest {
-                    epoch_seed: staking_epoch_data.seed.clone(),
-                    global_slot: slot.to_string(),
+                    epoch_seed: local_seed.clone(),
+                    global_slot: local_slot.clone(),
                     delegator_index: *index,
                 })
                 .into_iter()
@@ -288,63 +298,28 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
+fn extract_delegators(ledger: &[LedgerAccountJson]) -> Vec<LedgerAccount> {
+    let delegators = ledger
+        .into_iter()
+        .enumerate()
+        .map(|(i, a)| LedgerAccount {
+            pk: a.pk.clone(),
+            balance: a.balance.clone(),
+            delegate: a.delegate.clone(),
+            index: i as i64,
+        })
+        .collect();
+
+    delegators
+}
+
 async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
-    let request_body = StakingData::build_query(staking_data::Variables {});
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(&opts.endpoint)
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: Response<staking_data::ResponseData> = res.json().await?;
-    if let Some(es) = response_body.errors {
-        for e in es {
-            log::error!("{}", e);
-        }
-        return Err(anyhow!("response_body contains errors"));
-    }
-
-    let best_chain = match &response_body.data {
-        None => bail!("response_body data is empty"),
-        Some(data) => match &data.best_chain {
-            None => bail!("best_chain is None"),
-            Some(best_chain) => match best_chain.len() == 1 {
-                false => bail!("should only have 1 best_chain"),
-                true => &best_chain[0],
-            },
-        },
-    };
-    let staking_epoch_data = &best_chain.protocol_state.consensus_state.staking_epoch_data;
+    let (_, total_currency, _, delegators) =
+        get_staking_data(&opts.endpoint, opts.epoch as i64).await?;
     let total_currency = {
-        let mut currency = Decimal::from_str(&staking_epoch_data.ledger.total_currency)?;
+        let mut currency = Decimal::from_str(&total_currency)?;
         currency.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
         currency
-    };
-
-    let request_body = Account::build_query(account::Variables {
-        public_key: opts.pubkey,
-    });
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(&opts.endpoint)
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: Response<account::ResponseData> = res.json().await?;
-    if let Some(es) = response_body.errors {
-        for e in es {
-            log::error!("{}", e);
-        }
-        return Err(anyhow!("response_body contains errors"));
-    }
-    let delegators = match &response_body.data {
-        None => bail!("response_body data is empty"),
-        Some(data) => match &data.account {
-            None => bail!("delegators is None"),
-            Some(account) => account.delegators.as_ref().unwrap(),
-        },
     };
 
     let stdin = std::io::stdin();
@@ -357,10 +332,9 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
         let mut balance = Decimal::from_str(
             &delegators
                 .iter()
-                .find(|d| d.index == Some(patched.message.delegator_index))
-                .unwrap()
-                .balance
-                .total,
+                .find(|x| x.index == patched.message.delegator_index)
+                .ok_or(anyhow!("can't find delegator"))?
+                .balance,
         )?;
         balance.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
         patched.vrf_threshold = Some(BatchPatchWitnessSingleVrfThresholdRequest {
@@ -374,33 +348,10 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
 }
 
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
-    let request_body = Account::build_query(account::Variables {
-        public_key: opts.pubkey,
-    });
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(&opts.endpoint)
-        .json(&request_body)
-        .send()
-        .await?;
-    let response_body: Response<account::ResponseData> = res.json().await?;
-    if let Some(es) = response_body.errors {
-        for e in es {
-            log::error!("{}", e);
-        }
-        return Err(anyhow!("response_body contains errors"));
-    }
-    let delegators = match &response_body.data {
-        None => bail!("response_body data is empty"),
-        Some(data) => match &data.account {
-            None => bail!("delegators is None"),
-            Some(account) => account.delegators.as_ref().unwrap(),
-        },
-    };
-
     let stdin = std::io::stdin();
     let stdin = stdin.lock();
+
+    let (_, _, _, delegators) = get_staking_data(&opts.endpoint, opts.epoch as i64).await?;
 
     let deserializer = serde_json::Deserializer::from_reader(stdin);
     let iterator = deserializer.into_iter::<BatchCheckWitnessSingleRequest>();
@@ -421,6 +372,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         (NUM_SLOTS_IN_EPOCH * (opts.epoch + 1) - 1),
     );
 
+    let delegators_indices = delegators
+        .into_iter()
+        .filter(|x| x.delegate == opts.pubkey)
+        .map(|x| x.index)
+        .collect::<Vec<_>>();
+
     let mut invalid_slots = vec![];
     let mut local_invalid_slots = vec![];
     let mut producing_slots = vec![];
@@ -436,13 +393,14 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             producing_slots.push(slot);
             local_producing_slots.push(slot - first_slot_in_epoch);
         }
-        if !delegators.iter().all(|x| {
+        if !delegators_indices.iter().all(|x| {
             vrf_results
                 .iter()
-                .find(|v| v.message.delegator_index == x.index.unwrap())
+                .find(|v| v.message.delegator_index == *x)
                 .is_some()
         }) {
             invalid_slots.push(slot);
+            local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
         }
     }
