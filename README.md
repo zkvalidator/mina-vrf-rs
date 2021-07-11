@@ -29,7 +29,7 @@ Send `witnesses` to delegator.
 
 ```
 cat witnesses | cargo run --release -- batch-patch-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5 > patches
-cat patches | mina advanced vrf batch-check-witness | grep -v grep -v CODA_PRIVKEY_PASS > check
+cat patches | mina advanced vrf batch-check-witness | grep -v CODA_PRIVKEY_PASS > check
 cat check | cargo run --release -- batch-check-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5
 ```
 
