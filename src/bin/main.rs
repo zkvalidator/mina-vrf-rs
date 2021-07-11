@@ -329,7 +329,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     let iterator = deserializer.into_iter::<BatchPatchWitnessSingleRequest>();
     for item in iterator {
         let mut patched = item?;
-        let mut balance = Decimal::from_str(
+        let balance = Decimal::from_str(
             &delegators
                 .iter()
                 .find(|x| x.index == patched.message.delegator_index)
