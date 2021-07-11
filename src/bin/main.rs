@@ -336,7 +336,6 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
                 .ok_or(anyhow!("can't find delegator"))?
                 .balance,
         )?;
-        balance.set_scale(DIGITS_AFTER_DECIMAL_POINT)?;
         patched.vrf_threshold = Some(BatchPatchWitnessSingleVrfThresholdRequest {
             delegated_stake: balance.to_string(),
             total_stake: total_currency.to_string(),
