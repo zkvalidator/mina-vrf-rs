@@ -20,7 +20,7 @@ An example workflow - proving to a delegator your eligible blocks:
 
 ```
 cargo run --release -- batch-generate-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5 > requests
-cat requests | mina advanced vrf batch-generate-witness --privkey-path /keys/my-wallet | grep -v PASS > witnesses
+cat requests | mina advanced vrf batch-generate-witness --privkey-path /keys/my-wallet | grep -v CODA_PRIVKEY_PASS > witnesses
 ```
 
 Send `witnesses` to delegator.
@@ -29,7 +29,7 @@ Send `witnesses` to delegator.
 
 ```
 cat responses | cargo run --release -- batch-patch-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5 > patches
-cat patches | mina advanced vrf batch-check-witness | grep -v PASS > check
+cat patches | mina advanced vrf batch-check-witness | grep -v grep -v CODA_PRIVKEY_PASS > check
 cat check | cargo run --release -- batch-check-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5
 ```
 
