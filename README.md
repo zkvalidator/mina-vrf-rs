@@ -28,7 +28,7 @@ Send `witnesses` to delegator.
 ### Run by delegator
 
 ```
-cat responses | cargo run --release -- batch-patch-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5 > patches
+cat witnesses | cargo run --release -- batch-patch-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5 > patches
 cat patches | mina advanced vrf batch-check-witness | grep -v PASS > check
 cat check | cargo run --release -- batch-check-witness --pub B62qrHzjcZbYSsrcXVgGko7go1DzSEBfdQGPon5X4LEGExtNJZA4ECj --epoch 5
 ```
