@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The Mina consensus algorithm uses a VRF to determine whether a block producer is eligible to produce a block at a specific slot. The VRF is produced with the block producer's public key.
+The Mina consensus algorithm uses a VRF to determine whether a block producer is eligible to produce a block at a specific slot. The VRF is produced with the block producer's private key.
 A block producer can thus provably see and show whether they were eligible to produce blocks at a given slot, providing two interesting use cases:
 
 * Knowing ahead of time at which slots a block can be produced, and use that knowledge to improve reliability
