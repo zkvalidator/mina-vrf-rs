@@ -1,37 +1,17 @@
+#![allow(clippy::enum_variant_names)]
+
 use anyhow::{anyhow, bail, Result};
 use clap::Clap;
 use graphql_client::*;
 use reqwest::IntoUrl;
 use rust_decimal::Decimal;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-type UInt32 = String;
-type UInt64 = String;
-
-const NUM_SLOTS_IN_EPOCH: usize = 7140;
-const DIGITS_AFTER_DECIMAL_POINT: u32 = 9;
-const MINA_EXPLORER_ENDPOINT: &str = "https://graphql.minaexplorer.com";
-
-// The paths are relative to the directory where your `Cargo.toml` is located.
-// Both json and the GraphQL schema language are supported as sources for the schema
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "contrib/regen_schema.graphql",
-    query_path = "contrib/query.graphql",
-    response_derives = "Debug,Serialize,PartialEq"
-)]
-pub struct StakingData;
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "contrib/explorer_regen_schema.graphql",
-    query_path = "contrib/explorer_query.graphql",
-    response_derives = "Debug,Serialize,PartialEq"
-)]
-pub struct StakingDataExplorer;
+use mina_vrf_rs::graphql::*;
+use mina_vrf_rs::r#const::*;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -64,7 +44,7 @@ struct VRFOpts {
     #[clap(
         short = "e",
         long = "endpoint",
-        default_value = "http://localhost:3085/graphql"
+        default_value = DEFAULT_LOCAL_ENDPOINT
     )]
     endpoint: String,
     /// User public key string
@@ -72,64 +52,6 @@ struct VRFOpts {
     pubkey: String,
     #[clap(short = "n", long = "epoch")]
     epoch: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct BatchGenerateWitnessSingleRequest {
-    global_slot: String,
-    epoch_seed: String,
-    delegator_index: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct BatchPatchWitnessSingleVrfThresholdRequest {
-    delegated_stake: String,
-    total_stake: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct BatchPatchWitnessSingleRequest {
-    message: BatchGenerateWitnessSingleRequest,
-    public_key: String,
-    c: String,
-    s: String,
-    #[serde(rename = "ScaledMessageHash")]
-    scaled_message_hash: Vec<String>,
-    vrf_threshold: Option<BatchPatchWitnessSingleVrfThresholdRequest>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct BatchCheckWitnessSingleRequest {
-    message: BatchGenerateWitnessSingleRequest,
-    public_key: String,
-    c: String,
-    s: String,
-    #[serde(rename = "ScaledMessageHash")]
-    scaled_message_hash: Vec<String>,
-    vrf_threshold: BatchPatchWitnessSingleVrfThresholdRequest,
-    vrf_output: String,
-    vrf_output_fractional: f64,
-    threshold_met: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct LedgerAccountJson {
-    pk: String,
-    balance: String,
-    delegate: String,
-}
-
-struct LedgerAccount {
-    #[allow(unused)]
-    pk: String,
-    balance: String,
-    delegate: String,
-    index: i64,
 }
 
 #[tokio::main]
