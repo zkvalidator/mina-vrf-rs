@@ -340,7 +340,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
             delegated_stake: balance.to_string(),
             total_stake: total_currency.to_string(),
         });
-        println!("{}", serde_json::to_string(&patched).unwrap());
+        log::info!("{}", serde_json::to_string(&patched).unwrap());
     }
 
     Ok(())
