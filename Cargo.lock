@@ -632,15 +632,18 @@ checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 [[package]]
 name = "mina-graphql-rs"
 version = "0.1.0"
-source = "git+https://github.com/zkvalidator/mina-graphql-rs#127fd0a6150a92871c6a53237fdb86b4dbef9ebd"
+source = "git+https://github.com/zkvalidator/mina-graphql-rs#b3322744ea2a52e3668f37d762c39faff46e3863"
 dependencies = [
  "anyhow",
  "graphql_client",
  "log",
  "reqwest",
+ "rust_decimal",
+ "rust_decimal_macros",
  "serde",
  "serde_derive",
  "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]

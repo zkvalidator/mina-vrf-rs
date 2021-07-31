@@ -5,9 +5,9 @@ use clap::Clap;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 
 use mina_graphql_rs::*;
-use mina_vrf_rs::r#const::*;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -49,6 +49,49 @@ struct VRFOpts {
     #[clap(short = "n", long = "epoch")]
     epoch: usize,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchGenerateWitnessSingleRequest {
+    pub global_slot: String,
+    pub epoch_seed: String,
+    pub delegator_index: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchPatchWitnessSingleVrfThresholdRequest {
+    pub delegated_stake: String,
+    pub total_stake: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchPatchWitnessSingleRequest {
+    pub message: BatchGenerateWitnessSingleRequest,
+    pub public_key: String,
+    pub c: String,
+    pub s: String,
+    #[serde(rename = "ScaledMessageHash")]
+    pub scaled_message_hash: Vec<String>,
+    pub vrf_threshold: Option<BatchPatchWitnessSingleVrfThresholdRequest>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchCheckWitnessSingleRequest {
+    pub message: BatchGenerateWitnessSingleRequest,
+    pub public_key: String,
+    pub c: String,
+    pub s: String,
+    #[serde(rename = "ScaledMessageHash")]
+    pub scaled_message_hash: Vec<String>,
+    pub vrf_threshold: BatchPatchWitnessSingleVrfThresholdRequest,
+    pub vrf_output: String,
+    pub vrf_output_fractional: f64,
+    pub threshold_met: bool,
+}
+
 
 #[tokio::main]
 async fn main() {
