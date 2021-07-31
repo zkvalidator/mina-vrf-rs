@@ -292,7 +292,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         .collect::<Vec<_>>();
 
     for request in requests {
-        println!("{}", serde_json::to_string(&request)?);
+        log::info!("{}", serde_json::to_string(&request)?);
     }
 
     Ok(())
@@ -340,7 +340,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
             delegated_stake: balance.to_string(),
             total_stake: total_currency.to_string(),
         });
-        println!("{}", serde_json::to_string(&patched).unwrap());
+        log::info!("{}", serde_json::to_string(&patched).unwrap());
     }
 
     Ok(())
@@ -404,10 +404,18 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         }
     }
 
-    println!("invalid slots: {:?}", invalid_slots);
-    println!("invalid local slots: {:?}", local_invalid_slots);
-    println!("producing slots: {:?}", producing_slots);
-    println!("producing local slots: {:?}", local_producing_slots);
+    if invalid_slots.is_empty() {
+        log::info!("no invalid slot");
+    } else {
+        log::error!("invalid slots: {:?}", invalid_slots);
+    }
+    if local_invalid_slots.is_empty() {
+        log::info!("no invalid local slot");
+    } else {
+        log::error!("invalid local slots: {:?}", local_invalid_slots);
+    }
+    log::info!("producing slots: {:?}", producing_slots);
+    log::info!("producing local slots: {:?}", local_producing_slots);
 
     Ok(())
 }
