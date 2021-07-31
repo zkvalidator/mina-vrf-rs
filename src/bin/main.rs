@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use clap::Clap;
+use graphql_client::GraphQLQuery;
 use graphql_client::*;
 use reqwest::IntoUrl;
 use rust_decimal::Decimal;
@@ -9,7 +10,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::str::FromStr;
-use graphql_client::GraphQLQuery;
 
 use mina_graphql_rs::*;
 use mina_vrf_rs::r#const::*;
