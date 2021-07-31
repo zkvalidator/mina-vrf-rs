@@ -292,7 +292,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         .collect::<Vec<_>>();
 
     for request in requests {
-        println!("{}", serde_json::to_string(&request)?);
+        log::info!("{}", serde_json::to_string(&request)?);
     }
 
     Ok(())
@@ -404,10 +404,10 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         }
     }
 
-    println!("invalid slots: {:?}", invalid_slots);
-    println!("invalid local slots: {:?}", local_invalid_slots);
-    println!("producing slots: {:?}", producing_slots);
-    println!("producing local slots: {:?}", local_producing_slots);
+    log::error!("invalid slots: {:?}", invalid_slots);
+    log::error!("invalid local slots: {:?}", local_invalid_slots);
+    log::info!("producing slots: {:?}", producing_slots);
+    log::info!("producing local slots: {:?}", local_producing_slots);
 
     Ok(())
 }
