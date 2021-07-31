@@ -96,7 +96,9 @@ async fn graphql_query<U: IntoUrl, B: Serialize + ?Sized, R: DeserializeOwned>(
         return Err(anyhow!("response_body contains errors"));
     }
 
-    response_body.data.ok_or_else(|| anyhow!("response_body was none"))
+    response_body
+        .data
+        .ok_or_else(|| anyhow!("response_body was none"))
 }
 
 async fn get_staking_data(
@@ -313,11 +315,10 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             producing_slots.push(slot);
             local_producing_slots.push(slot - first_slot_in_epoch);
         }
-        if !delegators_indices.iter().all(|x| {
-            vrf_results
-                .iter()
-                .any(|v| v.message.delegator_index == *x)
-        }) {
+        if !delegators_indices
+            .iter()
+            .all(|x| vrf_results.iter().any(|v| v.message.delegator_index == *x))
+        {
             invalid_slots.push(slot);
             local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
