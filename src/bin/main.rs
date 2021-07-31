@@ -78,8 +78,6 @@ async fn main() {
     }
 }
 
-
-
 async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
     let (seed, _, _, delegators) = get_staking_data(&opts.endpoint, opts.epoch as i64).await?;
     let delegators_indices = delegators
@@ -118,7 +116,6 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
 
     Ok(())
 }
-
 
 async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     let (_, total_currency, _, delegators) =
