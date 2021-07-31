@@ -96,7 +96,7 @@ async fn graphql_query<U: IntoUrl, B: Serialize + ?Sized, R: DeserializeOwned>(
         return Err(anyhow!("response_body contains errors"));
     }
 
-    response_body.data.ok_or(anyhow!("response_body was none"))
+    response_body.data.ok_or_else(|| anyhow!("response_body was none"))
 }
 
 async fn get_staking_data(
@@ -123,36 +123,36 @@ async fn get_staking_data(
 
         let explorer_staking_epoch_data = data.blocks[0]
             .as_ref()
-            .ok_or(anyhow!("no block"))?
+            .ok_or_else(|| anyhow!("no block"))?
             .protocol_state
             .as_ref()
-            .ok_or(anyhow!("no protocol state"))?
+            .ok_or_else(|| anyhow!("no protocol state"))?
             .consensus_state
             .as_ref()
-            .ok_or(anyhow!("no consensus state"))?
+            .ok_or_else(|| anyhow!("no consensus state"))?
             .staking_epoch_data
             .as_ref()
-            .ok_or(anyhow!("no staking epoch data"))?;
+            .ok_or_else(|| anyhow!("no staking epoch data"))?;
 
         let ledger = &explorer_staking_epoch_data
             .ledger
             .as_ref()
-            .ok_or(anyhow!("no ledger"))?;
+            .ok_or_else(|| anyhow!("no ledger"))?;
         let seed = explorer_staking_epoch_data
             .seed
             .as_ref()
-            .ok_or(anyhow!("no seed"))?;
+            .ok_or_else(|| anyhow!("no seed"))?;
         let total_currency = &ledger
             .total_currency
             .as_ref()
-            .ok_or(anyhow!("no total currency"))?;
+            .ok_or_else(|| anyhow!("no total currency"))?;
         let ledger_hash = explorer_staking_epoch_data
             .ledger
             .as_ref()
-            .ok_or(anyhow!("no ledger"))?
+            .ok_or_else(|| anyhow!("no ledger"))?
             .hash
             .as_ref()
-            .ok_or(anyhow!("no hash"))?;
+            .ok_or_else(|| anyhow!("no hash"))?;
 
         (
             seed.clone(),
@@ -209,7 +209,6 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
                     global_slot: local_slot.clone(),
                     delegator_index: *index,
                 })
-                .into_iter()
         })
         .collect::<Vec<_>>();
 
@@ -222,7 +221,7 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
 
 fn extract_delegators(ledger: &[LedgerAccountJson]) -> Vec<LedgerAccount> {
     let delegators = ledger
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(i, a)| LedgerAccount {
             pk: a.pk.clone(),
@@ -255,7 +254,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
             &delegators
                 .iter()
                 .find(|x| x.index == patched.message.delegator_index)
-                .ok_or(anyhow!("can't find delegator"))?
+                .ok_or_else(|| anyhow!("can't find delegator"))?
                 .balance,
         )?;
         patched.vrf_threshold = Some(BatchPatchWitnessSingleVrfThresholdRequest {
@@ -285,7 +284,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         }
         slot_to_vrf_results
             .get_mut(&slot)
-            .ok_or(anyhow!("could not get mut"))?
+            .ok_or_else(|| anyhow!("could not get mut"))?
             .push(e.clone());
     }
     let (first_slot_in_epoch, last_slot_in_epoch) = (
@@ -317,8 +316,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         if !delegators_indices.iter().all(|x| {
             vrf_results
                 .iter()
-                .find(|v| v.message.delegator_index == *x)
-                .is_some()
+                .any(|v| v.message.delegator_index == *x)
         }) {
             invalid_slots.push(slot);
             local_invalid_slots.push(slot - first_slot_in_epoch);
