@@ -3,9 +3,9 @@
 use anyhow::{anyhow, Result};
 use clap::Clap;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
-use serde::{Deserialize, Serialize};
 
 use mina_graphql_rs::*;
 
@@ -91,7 +91,6 @@ pub struct BatchCheckWitnessSingleRequest {
     pub vrf_output_fractional: f64,
     pub threshold_met: bool,
 }
-
 
 #[tokio::main]
 async fn main() {
