@@ -404,8 +404,16 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         }
     }
 
-    log::error!("invalid slots: {:?}", invalid_slots);
-    log::error!("invalid local slots: {:?}", local_invalid_slots);
+    if invalid_slots.is_empty() {
+        log::info!("no invalid slot");
+    } else {
+        log::error!("invalid slots: {:?}", invalid_slots);
+    }
+    if local_invalid_slots.is_empty() {
+        log::info!("no invalid local slot");
+    } else {
+        log::error!("invalid local slots: {:?}", local_invalid_slots);
+    }
     log::info!("producing slots: {:?}", producing_slots);
     log::info!("producing local slots: {:?}", local_producing_slots);
 
