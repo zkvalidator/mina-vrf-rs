@@ -9,8 +9,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::str::FromStr;
+use graphql_client::GraphQLQuery;
 
-use mina_vrf_rs::graphql::*;
+use mina_graphql_rs::*;
 use mina_vrf_rs::r#const::*;
 
 /// mina-vrf-rs client
