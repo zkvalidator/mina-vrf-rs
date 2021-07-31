@@ -632,7 +632,7 @@ checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 [[package]]
 name = "mina-graphql-rs"
 version = "0.1.0"
-source = "git+https://github.com/zkvalidator/mina-graphql-rs?branch=feat/migrate-more#0145350a5d31f4434b670424124b27d06eb22908"
+source = "git+https://github.com/zkvalidator/mina-graphql-rs#127fd0a6150a92871c6a53237fdb86b4dbef9ebd"
 dependencies = [
  "anyhow",
  "graphql_client",
