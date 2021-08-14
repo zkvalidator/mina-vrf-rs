@@ -21,6 +21,7 @@ enum SubCommand {
     BatchGenerateWitness(VRFOpts),
     BatchPatchWitness(VRFOpts),
     BatchCheckWitness(VRFOpts),
+    CheckWinners(CheckWinnersOpts)
 }
 
 /// A subcommand for generating key pair
@@ -48,6 +49,16 @@ struct VRFOpts {
     pubkey: String,
     #[clap(short = "n", long = "epoch")]
     epoch: usize,
+}
+
+/// A subcommand for checking block winners
+#[derive(Clap)]
+struct CheckWinnersOpts {
+    /// User public key string
+    #[clap(short = "p", long = "pub")]
+    pubkey: String,
+    #[clap(short = "n", long = "epoch")]
+    epoch: usize,    
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -112,6 +123,12 @@ async fn main() {
             }
         },
         SubCommand::BatchCheckWitness(o) => match batch_check_witness(o).await {
+            Err(e) => log::error!("{}", e),
+            _ => {
+                log::info!("command successfully!");
+            }
+        },
+        SubCommand::CheckWinners(o) => match check_winners(o).await {
             Err(e) => log::error!("{}", e),
             _ => {
                 log::info!("command successfully!");
@@ -263,5 +280,9 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     log::info!("producing slots: {:?}", producing_slots);
     log::info!("producing local slots: {:?}", local_producing_slots);
 
+    Ok(())
+}
+
+async fn check_winners(opts: CheckWinnersOpts) -> Result<()> {
     Ok(())
 }
