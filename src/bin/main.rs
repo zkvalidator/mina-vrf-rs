@@ -300,6 +300,7 @@ async fn check_winners(opts: CheckWinnersOpts) -> Result<()> {
         if winner == &opts.pubkey {
             log::info!("block {:?} winner is ourself", b.block_height);
         } else {
+            // TODO:
         }
     }
 
