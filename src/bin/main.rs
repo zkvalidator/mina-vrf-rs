@@ -21,7 +21,7 @@ enum SubCommand {
     BatchGenerateWitness(VRFOpts),
     BatchPatchWitness(VRFOpts),
     BatchCheckWitness(VRFOpts),
-    CheckWinners(CheckWinnersOpts)
+    CheckWinners(CheckWinnersOpts),
 }
 
 /// A subcommand for generating key pair
@@ -58,7 +58,7 @@ struct CheckWinnersOpts {
     #[clap(short = "p", long = "pub")]
     pubkey: String,
     #[clap(short = "n", long = "epoch")]
-    epoch: usize,    
+    epoch: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -284,5 +284,24 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
 }
 
 async fn check_winners(opts: CheckWinnersOpts) -> Result<()> {
+    let blocks = get_epoch_blocks_winners_from_explorer(opts.epoch as i64).await?;
+
+    for b in blocks {
+        log::info!("block {:?}", b.block_height);
+        let winner = b
+            .winner_account
+            .as_ref()
+            .ok_or(anyhow!("no winner_account"))?
+            .public_key
+            .as_ref()
+            .ok_or(anyhow!("winner_account no public_key"))?;
+        log::info!("winnerAccount {:?}", winner);
+
+        if winner == &opts.pubkey {
+            log::info!("block {:?} winner is ourself", b.block_height);
+        } else {
+        }
+    }
+
     Ok(())
 }
