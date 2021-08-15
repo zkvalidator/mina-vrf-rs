@@ -10,8 +10,6 @@ use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
 use mina_graphql_rs::*;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -371,7 +369,9 @@ fn is_threshold_met(req: &BatchCheckWitnessSingleRequest) -> bool {
     let f = BigRational::from_float(F).unwrap();
 
     let lhs: BigRational = (one.clone() - f).pow(&amount);
-    let rhs: BigRational = BigRational::from(one - (BigRational::from(vrf_output) / two.pow(256) / c)).pow(&total_stake);
+    let rhs: BigRational =
+        BigRational::from(one - (BigRational::from(vrf_output) / two.pow(256) / c))
+            .pow(&total_stake);
 
     lhs <= rhs
 }
