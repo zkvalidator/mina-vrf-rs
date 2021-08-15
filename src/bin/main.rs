@@ -10,6 +10,8 @@ use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
 use mina_graphql_rs::*;
+use num_bigint::{BigInt, Sign};
+use bigdecimal::{BigDecimal, ToPrimitive};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -103,6 +105,12 @@ pub struct CheckWitnessOutput {
     pub local_producing_slots: Vec<usize>,
     pub invalid_slots: Vec<usize>,
     pub local_invalid_slots: Vec<usize>,
+    pub won_slots: Vec<usize>,
+    pub local_won_slots: Vec<usize>,
+    pub lost_slots: Vec<usize>,
+    pub local_lost_slots: Vec<usize>,
+    pub missed_slots: Vec<usize>,
+    pub local_missed_slots: Vec<usize>,
 }
 
 fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
@@ -217,6 +225,14 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
+fn vrf_output_to_fractional(vrf_output: &str) -> Result<f64> {
+    let bytes = bs58::decode(vrf_output).into_vec()?;
+    let vrf_bytes = bytes[3..35].to_vec();
+    let vrf = BigDecimal::from((BigInt::from_bytes_le(Sign::Plus, &vrf_bytes), 0i64));
+    let adjust = BigDecimal::from((BigInt::from(2).pow(253), 0i64));
+    (vrf/adjust).to_f64().ok_or(anyhow!("should have converted decimal to float"))
+}
+
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let stdin = std::io::stdin();
     let stdin = stdin.lock();
@@ -226,6 +242,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let deserializer = serde_json::Deserializer::from_reader(stdin);
     let iterator = deserializer.into_iter::<BatchCheckWitnessSingleRequest>();
     let mut slot_to_vrf_results: HashMap<String, Vec<_>> = HashMap::new();
+    let winners_for_epoch = get_winners_for_epoch(opts.epoch).await?;
     for item in iterator {
         let e = item?;
         let slot = e.message.global_slot.clone();
@@ -236,9 +253,6 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             .get_mut(&slot)
             .ok_or(anyhow!("could not get mut"))?
             .push(e.clone());
-
-        // TODO: write to output
-        check_winners(opts.epoch, &opts.pubkey, e).await?;
     }
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
@@ -255,6 +269,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let mut local_invalid_slots = vec![];
     let mut producing_slots = vec![];
     let mut local_producing_slots = vec![];
+    let mut won_slots = vec![];
+    let mut local_won_slots = vec![];
+    let mut lost_slots = vec![];
+    let mut local_lost_slots = vec![];
+    let mut missed_slots = vec![];
+    let mut local_missed_slots = vec![];
     for slot in first_slot_in_epoch..=last_slot_in_epoch {
         if !slot_to_vrf_results.contains_key(&slot.to_string()) {
             invalid_slots.push(slot);
@@ -276,6 +296,24 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
         }
+        let first_threshold_met = vrf_results.iter().find(|v| v.threshold_met);
+        if let Some(delegator) = first_threshold_met {
+            let winner_for_slot = &winners_for_epoch[&(slot as i64)];
+            if &winner_for_slot.public_key == &opts.pubkey {
+                won_slots.push(slot);
+                local_won_slots.push(slot - first_slot_in_epoch);
+            } else {
+                let winner_fractional = vrf_output_to_fractional(&winner_for_slot.vrf)?;
+                let our_fractional = delegator.vrf_output_fractional;
+                if our_fractional < winner_fractional {
+                    missed_slots.push(slot);
+                    local_missed_slots.push(slot - first_slot_in_epoch);
+                } else {
+                    lost_slots.push(slot);
+                    local_lost_slots.push(slot - first_slot_in_epoch);
+                }
+            }
+        }
     }
 
     if invalid_slots.is_empty() {
@@ -290,12 +328,24 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     }
     log::info!("producing slots: {:?}", producing_slots);
     log::info!("producing local slots: {:?}", local_producing_slots);
+    log::info!("won slots: {:?}", won_slots);
+    log::info!("won local slots: {:?}", local_won_slots);
+    log::info!("lost slots: {:?}", lost_slots);
+    log::info!("lost local slots: {:?}", local_lost_slots);
+    log::info!("missed slots: {:?}", missed_slots);
+    log::info!("missed local slots: {:?}", local_missed_slots);
 
     let result = CheckWitnessOutput {
         producing_slots,
         local_producing_slots,
         invalid_slots,
         local_invalid_slots,
+        won_slots,
+        local_won_slots,
+        lost_slots,
+        local_lost_slots,
+        missed_slots,
+        local_missed_slots,
     };
     let mut f = open_buffered_file(&opts.out_file)?;
     f.write_all(serde_json::to_string(&result)?.as_bytes())?;
@@ -307,22 +357,28 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct WinnerResult {
-    our_blocks: Vec<i64>,
-    others_blocks: Vec<i64>,
-    blocks_we_miss: Vec<i64>,
+    pub vrf: String,
+    pub public_key: String,
 }
 
-async fn check_winners(
+async fn get_winners_for_epoch(
     epoch: usize,
-    pubkey: &str,
-    req: BatchCheckWitnessSingleRequest,
-) -> Result<WinnerResult> {
+) -> Result<HashMap<i64, WinnerResult>> {
     let blocks = get_epoch_blocks_winners_from_explorer(epoch as i64).await?;
-    let mut winner_result = WinnerResult::default();
+    let mut winner_result: HashMap<i64, WinnerResult> = HashMap::new();
 
     for b in blocks {
-        let block_height = b.block_height.as_ref().ok_or(anyhow!("no block_height"))?;
-        log::info!("block {:?}", block_height);
+        let consensus_state = b
+            .protocol_state
+            .as_ref()
+            .ok_or(anyhow!("no protocol state"))?
+            .consensus_state
+            .as_ref()
+            .ok_or(anyhow!("no consensus state"))?;
+        let slot = consensus_state
+            .slot_since_genesis
+            .ok_or(anyhow!("couldn't get global slot"))?;
+
         let winner = b
             .winner_account
             .as_ref()
@@ -330,48 +386,18 @@ async fn check_winners(
             .public_key
             .as_ref()
             .ok_or(anyhow!("winner_account no public_key"))?;
-        log::info!("winnerAccount {:?}", winner);
 
-        if winner == pubkey {
-            log::info!("block {:?} winner is ourself", block_height);
-            winner_result.our_blocks.push(*block_height);
-        } else {
-            if is_threshold_met(&req) {
-                log::warn!("we should produce block {:?} but we didn't", block_height);
-                winner_result.blocks_we_miss.push(*block_height);
-            } else {
-                log::warn!("block {:?} belongs to others", block_height);
-                winner_result.others_blocks.push(*block_height);
-            }
-        }
+        let vrf = consensus_state
+            .last_vrf_output
+            .as_ref()
+            .ok_or(anyhow!("no vrf"))?;
+
+
+        winner_result.insert(slot, WinnerResult {
+            public_key: winner.to_string(),
+            vrf: vrf.to_string(),
+        });
     }
 
     Ok(winner_result)
-}
-
-// (* Check if
-//  vrf_output / 2^256 <= c * (1 - (1 - f)^(amount / total_stake))
-// i.e.,
-//  (1 - f)^amount <= (1 - (vrf_output / 2^256 / c))^total_stake
-// *)
-use mina_vrf_rs::params::{C, F};
-use num::rational::BigRational;
-use num::traits::*;
-use num::BigInt;
-fn is_threshold_met(req: &BatchCheckWitnessSingleRequest) -> bool {
-    let vrf_output = BigInt::from_str(&req.vrf_output).unwrap();
-    let amount = BigInt::from_str(&req.vrf_threshold.delegated_stake).unwrap();
-    let total_stake = BigInt::from_str(&req.vrf_threshold.total_stake).unwrap();
-
-    let one = BigRational::from(BigInt::from(1));
-    let two = BigRational::from(BigInt::from(2));
-    let c = BigRational::from(BigInt::from(C));
-    let f = BigRational::from_float(F).unwrap();
-
-    let lhs: BigRational = (one.clone() - f).pow(&amount);
-    let rhs: BigRational =
-        BigRational::from(one - (BigRational::from(vrf_output) / two.pow(256) / c))
-            .pow(&total_stake);
-
-    lhs <= rhs
 }
