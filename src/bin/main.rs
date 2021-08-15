@@ -21,7 +21,6 @@ enum SubCommand {
     BatchGenerateWitness(VRFOpts),
     BatchPatchWitness(VRFOpts),
     BatchCheckWitness(VRFOpts),
-    CheckWinners(CheckWinnersOpts),
 }
 
 /// A subcommand for generating key pair
@@ -44,16 +43,6 @@ struct VRFOpts {
         default_value = DEFAULT_LOCAL_ENDPOINT
     )]
     endpoint: String,
-    /// User public key string
-    #[clap(short = "p", long = "pub")]
-    pubkey: String,
-    #[clap(short = "n", long = "epoch")]
-    epoch: usize,
-}
-
-/// A subcommand for checking block winners
-#[derive(Clap)]
-struct CheckWinnersOpts {
     /// User public key string
     #[clap(short = "p", long = "pub")]
     pubkey: String,
@@ -123,12 +112,6 @@ async fn main() {
             }
         },
         SubCommand::BatchCheckWitness(o) => match batch_check_witness(o).await {
-            Err(e) => log::error!("{}", e),
-            _ => {
-                log::info!("command successfully!");
-            }
-        },
-        SubCommand::CheckWinners(o) => match check_winners(o).await {
             Err(e) => log::error!("{}", e),
             _ => {
                 log::info!("command successfully!");
@@ -228,6 +211,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             .get_mut(&slot)
             .ok_or(anyhow!("could not get mut"))?
             .push(e.clone());
+
+        check_winners(opts.epoch, &opts.pubkey, e).await?;
     }
     let (first_slot_in_epoch, last_slot_in_epoch) = (
         NUM_SLOTS_IN_EPOCH * opts.epoch,
@@ -283,8 +268,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
-async fn check_winners(opts: CheckWinnersOpts) -> Result<()> {
-    let blocks = get_epoch_blocks_winners_from_explorer(opts.epoch as i64).await?;
+async fn check_winners(
+    epoch: usize,
+    pubkey: &str,
+    req: BatchCheckWitnessSingleRequest,
+) -> Result<()> {
+    let blocks = get_epoch_blocks_winners_from_explorer(epoch as i64).await?;
 
     for b in blocks {
         log::info!("block {:?}", b.block_height);
@@ -297,7 +286,7 @@ async fn check_winners(opts: CheckWinnersOpts) -> Result<()> {
             .ok_or(anyhow!("winner_account no public_key"))?;
         log::info!("winnerAccount {:?}", winner);
 
-        if winner == &opts.pubkey {
+        if winner == pubkey {
             log::info!("block {:?} winner is ourself", b.block_height);
         } else {
             // TODO:
