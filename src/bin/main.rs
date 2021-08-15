@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use mina_graphql_rs::*;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -48,6 +50,8 @@ struct VRFOpts {
     pubkey: String,
     #[clap(short = "n", long = "epoch")]
     epoch: usize,
+    #[clap(short = "o", long = "out-file", default_value = "-")]
+    out_file: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -92,6 +96,23 @@ pub struct BatchCheckWitnessSingleRequest {
     pub threshold_met: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckWitnessOutput {
+    pub producing_slots: Vec<usize>,
+    pub local_producing_slots: Vec<usize>,
+    pub invalid_slots: Vec<usize>,
+    pub local_invalid_slots: Vec<usize>,
+}
+
+fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
+    return if path == "-" {
+        Ok(Box::new(BufWriter::new(io::stdout())))
+    } else {
+        Ok(Box::new(BufWriter::new(File::create(path)?)))
+    };
+}
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
@@ -102,19 +123,19 @@ async fn main() {
         SubCommand::BatchGenerateWitness(o) => match batch_generate_witness(o).await {
             Err(e) => log::error!("{}", e),
             _ => {
-                log::info!("command successfully!");
+                log::info!("Executed command successfully!");
             }
         },
         SubCommand::BatchPatchWitness(o) => match batch_patch_witness(o).await {
             Err(e) => log::error!("{}", e),
             _ => {
-                log::info!("command successfully!");
+                log::info!("Executed command successfully!");
             }
         },
         SubCommand::BatchCheckWitness(o) => match batch_check_witness(o).await {
             Err(e) => log::error!("{}", e),
             _ => {
-                log::info!("command successfully!");
+                log::info!("Executed command successfully!");
             }
         },
     }
@@ -152,9 +173,11 @@ async fn batch_generate_witness(opts: VRFOpts) -> Result<()> {
         })
         .collect::<Vec<_>>();
 
+    let mut f = open_buffered_file(&opts.out_file)?;
     for request in requests {
-        log::info!("{}", serde_json::to_string(&request)?);
+        f.write_all(format!("{}", serde_json::to_string(&request)?).as_bytes())?;
     }
+    f.flush()?;
 
     Ok(())
 }
@@ -170,6 +193,7 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
 
     let stdin = std::io::stdin();
     let stdin = stdin.lock();
+    let mut f = open_buffered_file(&opts.out_file)?;
 
     let deserializer = serde_json::Deserializer::from_reader(stdin);
     let iterator = deserializer.into_iter::<BatchPatchWitnessSingleRequest>();
@@ -186,8 +210,9 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
             delegated_stake: balance.to_string(),
             total_stake: total_currency.to_string(),
         });
-        log::info!("{}", serde_json::to_string(&patched).unwrap());
+        f.write_all(format!("{}", serde_json::to_string(&patched).unwrap()).as_bytes())?;
     }
+    f.flush()?;
 
     Ok(())
 }
@@ -262,6 +287,16 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     }
     log::info!("producing slots: {:?}", producing_slots);
     log::info!("producing local slots: {:?}", local_producing_slots);
+
+    let result = CheckWitnessOutput {
+        producing_slots,
+        local_producing_slots,
+        invalid_slots,
+        local_invalid_slots,
+    };
+    let mut f = open_buffered_file(&opts.out_file)?;
+    f.write_all(serde_json::to_string(&result)?.as_bytes())?;
+    f.flush()?;
 
     Ok(())
 }
