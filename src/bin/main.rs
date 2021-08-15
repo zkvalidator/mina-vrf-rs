@@ -9,9 +9,9 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
+use bigdecimal::{BigDecimal, ToPrimitive};
 use mina_graphql_rs::*;
 use num_bigint::{BigInt, Sign};
-use bigdecimal::{BigDecimal, ToPrimitive};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -230,7 +230,9 @@ fn vrf_output_to_fractional(vrf_output: &str) -> Result<f64> {
     let vrf_bytes = bytes[3..35].to_vec();
     let vrf = BigDecimal::from((BigInt::from_bytes_le(Sign::Plus, &vrf_bytes), 0i64));
     let adjust = BigDecimal::from((BigInt::from(2).pow(253), 0i64));
-    (vrf/adjust).to_f64().ok_or(anyhow!("should have converted decimal to float"))
+    (vrf / adjust)
+        .to_f64()
+        .ok_or(anyhow!("should have converted decimal to float"))
 }
 
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
@@ -260,10 +262,16 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     );
 
     let delegators_indices = delegators
-        .into_iter()
+        .iter()
         .filter(|x| x.delegate == opts.pubkey)
         .map(|x| x.index)
         .collect::<Vec<_>>();
+
+    let delegators_index_to_public_key = delegators
+        .into_iter()
+        .filter(|x| x.delegate == opts.pubkey)
+        .map(|x| (x.index, x.pk.clone()))
+        .collect::<HashMap<_, _>>();
 
     let mut invalid_slots = vec![];
     let mut local_invalid_slots = vec![];
@@ -297,15 +305,17 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             continue;
         }
         let first_threshold_met = vrf_results.iter().find(|v| v.threshold_met);
-        if let Some(delegator) = first_threshold_met {
+        if let Some(delegator_details) = first_threshold_met {
+            let delegator_public_key =
+                &delegators_index_to_public_key[&delegator_details.message.delegator_index];
             let winner_for_slot = &winners_for_epoch[&(slot as i64)];
-            if &winner_for_slot.public_key == &opts.pubkey {
+            if &winner_for_slot.public_key == delegator_public_key {
                 won_slots.push(slot);
                 local_won_slots.push(slot - first_slot_in_epoch);
             } else {
                 let winner_fractional = vrf_output_to_fractional(&winner_for_slot.vrf)?;
-                let our_fractional = delegator.vrf_output_fractional;
-                if our_fractional < winner_fractional {
+                let our_fractional = delegator_details.vrf_output_fractional;
+                if our_fractional > winner_fractional {
                     missed_slots.push(slot);
                     local_missed_slots.push(slot - first_slot_in_epoch);
                 } else {
@@ -361,9 +371,7 @@ struct WinnerResult {
     pub public_key: String,
 }
 
-async fn get_winners_for_epoch(
-    epoch: usize,
-) -> Result<HashMap<i64, WinnerResult>> {
+async fn get_winners_for_epoch(epoch: usize) -> Result<HashMap<i64, WinnerResult>> {
     let blocks = get_epoch_blocks_winners_from_explorer(epoch as i64).await?;
     let mut winner_result: HashMap<i64, WinnerResult> = HashMap::new();
 
@@ -392,11 +400,13 @@ async fn get_winners_for_epoch(
             .as_ref()
             .ok_or(anyhow!("no vrf"))?;
 
-
-        winner_result.insert(slot, WinnerResult {
-            public_key: winner.to_string(),
-            vrf: vrf.to_string(),
-        });
+        winner_result.insert(
+            slot,
+            WinnerResult {
+                public_key: winner.to_string(),
+                vrf: vrf.to_string(),
+            },
+        );
     }
 
     Ok(winner_result)
