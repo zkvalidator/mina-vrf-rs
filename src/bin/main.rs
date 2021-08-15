@@ -237,6 +237,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             .ok_or(anyhow!("could not get mut"))?
             .push(e.clone());
 
+        // TODO: write to output
         check_winners(opts.epoch, &opts.pubkey, e).await?;
     }
     let (first_slot_in_epoch, last_slot_in_epoch) = (
@@ -303,15 +304,24 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
+#[derive(Default)]
+struct WinnerResult {
+    our_blocks: Vec<i64>,
+    others_blocks: Vec<i64>,
+    blocks_we_miss: Vec<i64>,
+}
+
 async fn check_winners(
     epoch: usize,
     pubkey: &str,
     req: BatchCheckWitnessSingleRequest,
-) -> Result<()> {
+) -> Result<WinnerResult> {
     let blocks = get_epoch_blocks_winners_from_explorer(epoch as i64).await?;
+    let mut winner_result = WinnerResult::default();
 
     for b in blocks {
-        log::info!("block {:?}", b.block_height);
+        let block_height = b.block_height.as_ref().ok_or(anyhow!("no block_height"))?;
+        log::info!("block {:?}", block_height);
         let winner = b
             .winner_account
             .as_ref()
@@ -322,11 +332,22 @@ async fn check_winners(
         log::info!("winnerAccount {:?}", winner);
 
         if winner == pubkey {
-            log::info!("block {:?} winner is ourself", b.block_height);
+            log::info!("block {:?} winner is ourself", block_height);
+            winner_result.our_blocks.push(*block_height);
         } else {
-            // TODO:
+            if is_satisfied(&req) {
+                log::warn!("we should produce block {:?} but we didn't", block_height);
+                winner_result.blocks_we_miss.push(*block_height);
+            } else {
+                log::warn!("block {:?} belongs to others", block_height);
+                winner_result.others_blocks.push(*block_height);
+            }
         }
     }
 
-    Ok(())
+    Ok(winner_result)
+}
+
+fn is_satisfied(_req: &BatchCheckWitnessSingleRequest) -> bool {
+    false
 }
