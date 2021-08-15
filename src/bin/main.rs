@@ -10,6 +10,8 @@ use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
 use mina_graphql_rs::*;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
