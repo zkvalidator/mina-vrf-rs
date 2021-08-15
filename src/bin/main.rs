@@ -5,11 +5,11 @@ use clap::Clap;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
 use mina_graphql_rs::*;
-use std::fs::File;
-use std::io::{self, BufWriter, Write};
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -304,7 +304,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 struct WinnerResult {
     our_blocks: Vec<i64>,
     others_blocks: Vec<i64>,
@@ -335,7 +336,7 @@ async fn check_winners(
             log::info!("block {:?} winner is ourself", block_height);
             winner_result.our_blocks.push(*block_height);
         } else {
-            if is_satisfied(&req) {
+            if is_threshold_met(&req) {
                 log::warn!("we should produce block {:?} but we didn't", block_height);
                 winner_result.blocks_we_miss.push(*block_height);
             } else {
@@ -348,6 +349,27 @@ async fn check_winners(
     Ok(winner_result)
 }
 
-fn is_satisfied(_req: &BatchCheckWitnessSingleRequest) -> bool {
-    false
+// (* Check if
+//  vrf_output / 2^256 <= c * (1 - (1 - f)^(amount / total_stake))
+// i.e.,
+//  (1 - f)^amount <= (1 - (vrf_output / 2^256 / c))^total_stake
+// *)
+use mina_vrf_rs::params::{C, F};
+use num::rational::BigRational;
+use num::traits::*;
+use num::BigInt;
+fn is_threshold_met(req: &BatchCheckWitnessSingleRequest) -> bool {
+    let vrf_output = BigInt::from_str(&req.vrf_output).unwrap();
+    let amount = BigInt::from_str(&req.vrf_threshold.delegated_stake).unwrap();
+    let total_stake = BigInt::from_str(&req.vrf_threshold.total_stake).unwrap();
+
+    let one = BigRational::from(BigInt::from(1));
+    let two = BigRational::from(BigInt::from(2));
+    let c = BigRational::from(BigInt::from(C));
+    let f = BigRational::from_float(F).unwrap();
+
+    let lhs: BigRational = (one.clone() - f).pow(&amount);
+    let rhs: BigRational = BigRational::from(one - (BigRational::from(vrf_output) / two.pow(256) / c)).pow(&total_stake);
+
+    lhs <= rhs
 }
