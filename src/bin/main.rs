@@ -259,6 +259,8 @@ fn compare_vrfs(v1: &[u8], v2: &[u8]) -> bool {
     for (i, v) in v1.iter().enumerate() {
         if v > &v2[i] {
             return true;
+        } else if v < &v2[i] {
+            return false;
         }
     }
     return false;
