@@ -10,9 +10,9 @@ use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, ToPrimitive};
+use blake2b_simd::Params;
 use mina_graphql_rs::*;
 use num_bigint::{BigInt, Sign};
-use blake2b_simd::Params;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -251,7 +251,8 @@ fn vrf_output_to_digest_bytes(vrf_output: &str) -> Result<Vec<u8>> {
         .to_state()
         .update(&bytes)
         .finalize()
-        .as_bytes().to_vec())
+        .as_bytes()
+        .to_vec())
 }
 
 fn compare_vrfs(v1: &[u8], v2: &[u8]) -> bool {
@@ -348,7 +349,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             } else {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
-                if compare_vrfs(&our_digest, &winner_digest) {
+                if compare_vrfs(&winner_digest, &our_digest) {
                     missed_slots.push(slot);
                     local_missed_slots.push(slot - first_slot_in_epoch);
                 } else {
