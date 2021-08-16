@@ -379,8 +379,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                     }
                 }
             } else {
+
                 let winner_for_slot = &winners_for_epoch[&(slot as i64)];
                 let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
+                if slot == 71152 {
+                    println!("debug: {}, {}", &winner_for_slot.public_key, delegator_public_key);
+                }
                 if my_producer_is_the_winner {
                     won_slots.push(slot);
                     local_won_slots.push(slot - first_slot_in_epoch);
