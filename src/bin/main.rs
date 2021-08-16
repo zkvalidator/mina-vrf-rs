@@ -351,10 +351,21 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         if let Some(delegator_details) = first_threshold_met {
             let delegator_public_key =
                 &delegators_index_to_public_key[&delegator_details.message.delegator_index];
-            if !winners_for_epoch.contains_key(&(slot as i64))
-                || !blocks_for_creator_for_epoch.contains_key(&(slot as i64))
-            {
+            if !blocks_for_creator_for_epoch.contains_key(&(slot as i64)) {
                 let reason = MissedBlockReason::NotProducedOrPropagated;
+                missed_slots.push((slot, reason.clone()));
+                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                continue;
+            } else if !winners_for_epoch.contains_key(&(slot as i64))
+                && blocks_for_creator_for_epoch[&(slot as i64)].received_time
+                    > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
+                        + Duration::minutes(SLOT_TIME_MINUTES))
+            {
+                let block_creator = &blocks_for_creator_for_epoch[&(slot as i64)];
+                let reason = MissedBlockReason::PropagatedTooLate(
+                    block_creator.date_time.to_rfc3339(),
+                    block_creator.received_time.to_rfc3339(),
+                );
                 missed_slots.push((slot, reason.clone()));
                 local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
                 continue;
