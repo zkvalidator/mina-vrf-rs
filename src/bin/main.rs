@@ -384,6 +384,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                 if my_producer_is_the_winner {
                     won_slots.push(slot);
                     local_won_slots.push(slot - first_slot_in_epoch);
+                    continue;
                 } else {
                     if saw_my_producer {
                         let my_producer_block = &blocks_for_creator_for_epoch[&(slot as i64)];
@@ -424,6 +425,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                             );
                             missed_slots.push((slot, reason.clone()));
                             local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                            continue;
                         }
                     } else {
                         let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
