@@ -129,7 +129,6 @@ pub enum MissedBlockReason {
     NotProducedOrPropagated,
     PropagatedTooLate(String, String),
     HeightTooOld(i64, i64),
-    Unknown,
 }
 
 #[tokio::main]
@@ -351,59 +350,95 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         if let Some(delegator_details) = first_threshold_met {
             let delegator_public_key =
                 &delegators_index_to_public_key[&delegator_details.message.delegator_index];
-            if !blocks_for_creator_for_epoch.contains_key(&(slot as i64)) {
-                let reason = MissedBlockReason::NotProducedOrPropagated;
-                missed_slots.push((slot, reason.clone()));
-                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                continue;
-            } else if !winners_for_epoch.contains_key(&(slot as i64))
-                && blocks_for_creator_for_epoch[&(slot as i64)].received_time
-                    > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
-                        + Duration::minutes(SLOT_TIME_MINUTES))
-            {
-                let block_creator = &blocks_for_creator_for_epoch[&(slot as i64)];
-                let reason = MissedBlockReason::PropagatedTooLate(
-                    block_creator.date_time.to_rfc3339(),
-                    block_creator.received_time.to_rfc3339(),
-                );
-                missed_slots.push((slot, reason.clone()));
-                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                continue;
-            }
-            let winner_for_slot = &winners_for_epoch[&(slot as i64)];
-            if &winner_for_slot.public_key == delegator_public_key {
-                won_slots.push(slot);
-                local_won_slots.push(slot - first_slot_in_epoch);
-            } else if blocks_for_creator_for_epoch[&(slot as i64)].block_height
-                < winner_for_slot.block_height
-            {
-                let reason = MissedBlockReason::HeightTooOld(
-                    blocks_for_creator_for_epoch[&(slot as i64)].block_height,
-                    winner_for_slot.block_height,
-                );
-                missed_slots.push((slot, reason.clone()));
-                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-            } else {
-                let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
-                let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
-                if compare_vrfs(&our_digest, &winner_digest) {
-                    let reason = if blocks_for_creator_for_epoch[&(slot as i64)].received_time
-                        > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
-                            + Duration::minutes(SLOT_TIME_MINUTES))
-                    {
-                        let block_creator = &blocks_for_creator_for_epoch[&(slot as i64)];
-                        MissedBlockReason::PropagatedTooLate(
-                            block_creator.date_time.to_rfc3339(),
-                            block_creator.received_time.to_rfc3339(),
-                        )
-                    } else {
-                        MissedBlockReason::Unknown
-                    };
+
+            let winners_exist = winners_for_epoch.contains_key(&(slot as i64));
+            let saw_my_producer = blocks_for_creator_for_epoch.contains_key(&(slot as i64));
+            if !winners_exist {
+                if !saw_my_producer {
+                    let reason = MissedBlockReason::NotProducedOrPropagated;
                     missed_slots.push((slot, reason.clone()));
                     local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                    continue;
                 } else {
-                    lost_slots.push(slot);
-                    local_lost_slots.push(slot - first_slot_in_epoch);
+                    let late = blocks_for_creator_for_epoch[&(slot as i64)].received_time
+                        > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
+                            + Duration::minutes(SLOT_TIME_MINUTES));
+                    if late {
+                        let my_producer_block = &blocks_for_creator_for_epoch[&(slot as i64)];
+                        let reason = MissedBlockReason::PropagatedTooLate(
+                            my_producer_block.date_time.to_rfc3339(),
+                            my_producer_block.received_time.to_rfc3339(),
+                        );
+                        missed_slots.push((slot, reason.clone()));
+                        local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                        continue;
+                    } else {
+                        lost_slots.push(slot);
+                        local_lost_slots.push(slot - first_slot_in_epoch);
+                        continue;
+                    }
+                }
+            } else {
+                let winner_for_slot = &winners_for_epoch[&(slot as i64)];
+                let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
+                if my_producer_is_the_winner {
+                    won_slots.push(slot);
+                    local_won_slots.push(slot - first_slot_in_epoch);
+                } else {
+                    if saw_my_producer {
+                        let my_producer_block = &blocks_for_creator_for_epoch[&(slot as i64)];
+                        let block_height_equal =
+                            my_producer_block.block_height == winner_for_slot.block_height;
+                        if block_height_equal {
+                            let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
+                            let our_digest =
+                                vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                            if compare_vrfs(&our_digest, &winner_digest) {
+                                let late = blocks_for_creator_for_epoch[&(slot as i64)]
+                                    .received_time
+                                    > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
+                                        + Duration::minutes(SLOT_TIME_MINUTES));
+                                if late {
+                                    let reason = MissedBlockReason::PropagatedTooLate(
+                                        my_producer_block.date_time.to_rfc3339(),
+                                        my_producer_block.received_time.to_rfc3339(),
+                                    );
+                                    missed_slots.push((slot, reason.clone()));
+                                    local_missed_slots
+                                        .push((slot - first_slot_in_epoch, reason.clone()));
+                                    continue;
+                                } else {
+                                    lost_slots.push(slot);
+                                    local_lost_slots.push(slot - first_slot_in_epoch);
+                                    continue;
+                                }
+                            } else {
+                                lost_slots.push(slot);
+                                local_lost_slots.push(slot - first_slot_in_epoch);
+                                continue;
+                            }
+                        } else {
+                            let reason = MissedBlockReason::HeightTooOld(
+                                my_producer_block.block_height,
+                                winner_for_slot.block_height,
+                            );
+                            missed_slots.push((slot, reason.clone()));
+                            local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                        }
+                    } else {
+                        let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
+                        let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                        if compare_vrfs(&our_digest, &winner_digest) {
+                            let reason = MissedBlockReason::NotProducedOrPropagated;
+                            missed_slots.push((slot, reason.clone()));
+                            local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+                            continue;
+                        } else {
+                            lost_slots.push(slot);
+                            local_lost_slots.push(slot - first_slot_in_epoch);
+                            continue;
+                        }
+                    }
                 }
             }
         }
