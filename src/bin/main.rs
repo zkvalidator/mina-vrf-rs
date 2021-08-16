@@ -351,7 +351,9 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         if let Some(delegator_details) = first_threshold_met {
             let delegator_public_key =
                 &delegators_index_to_public_key[&delegator_details.message.delegator_index];
-            if !winners_for_epoch.contains_key(&(slot as i64)) {
+            if !winners_for_epoch.contains_key(&(slot as i64))
+                || !blocks_for_creator_for_epoch.contains_key(&(slot as i64))
+            {
                 let reason = MissedBlockReason::NotProducedOrPropagated;
                 missed_slots.push((slot, reason.clone()));
                 local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
@@ -361,9 +363,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             if &winner_for_slot.public_key == delegator_public_key {
                 won_slots.push(slot);
                 local_won_slots.push(slot - first_slot_in_epoch);
-            } else if blocks_for_creator_for_epoch.contains_key(&(slot as i64))
-                && blocks_for_creator_for_epoch[&(slot as i64)].block_height
-                    < winner_for_slot.block_height
+            } else if blocks_for_creator_for_epoch[&(slot as i64)].block_height
+                < winner_for_slot.block_height
             {
                 let reason = MissedBlockReason::HeightTooOld(
                     blocks_for_creator_for_epoch[&(slot as i64)].block_height,
@@ -375,10 +376,9 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
                 if compare_vrfs(&our_digest, &winner_digest) {
-                    let reason = if blocks_for_creator_for_epoch.contains_key(&(slot as i64))
-                        && blocks_for_creator_for_epoch[&(slot as i64)].received_time
-                            > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
-                                + Duration::minutes(SLOT_TIME_MINUTES))
+                    let reason = if blocks_for_creator_for_epoch[&(slot as i64)].received_time
+                        > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
+                            + Duration::minutes(SLOT_TIME_MINUTES))
                     {
                         let block_creator = &blocks_for_creator_for_epoch[&(slot as i64)];
                         MissedBlockReason::PropagatedTooLate(
