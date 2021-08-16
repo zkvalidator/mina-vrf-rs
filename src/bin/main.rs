@@ -12,6 +12,7 @@ use std::str::FromStr;
 use bigdecimal::{BigDecimal, ToPrimitive};
 use mina_graphql_rs::*;
 use num_bigint::{BigInt, Sign};
+use blake2b_simd::Params;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -225,14 +226,41 @@ async fn batch_patch_witness(opts: VRFOpts) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn vrf_output_to_fractional(vrf_output: &str) -> Result<f64> {
-    let bytes = bs58::decode(vrf_output).into_vec()?;
-    let vrf_bytes = bytes[3..35].to_vec();
+    let vrf_bytes = vrf_output_to_bytes(vrf_output)?;
     let vrf = BigDecimal::from((BigInt::from_bytes_le(Sign::Plus, &vrf_bytes), 0i64));
     let adjust = BigDecimal::from((BigInt::from(2).pow(253), 0i64));
     (vrf / adjust)
         .to_f64()
         .ok_or(anyhow!("should have converted decimal to float"))
+}
+
+fn vrf_output_to_bytes(vrf_output: &str) -> Result<Vec<u8>> {
+    let bytes = bs58::decode(vrf_output).into_vec()?;
+    if bytes.len() < 36 {
+        return Err(anyhow!("not enough bytes in vrf output"));
+    }
+    Ok(bytes[3..35].to_vec())
+}
+
+fn vrf_output_to_digest_bytes(vrf_output: &str) -> Result<Vec<u8>> {
+    let bytes = vrf_output_to_bytes(vrf_output)?;
+    Ok(Params::new()
+        .hash_length(32)
+        .to_state()
+        .update(&bytes)
+        .finalize()
+        .as_bytes().to_vec())
+}
+
+fn compare_vrfs(v1: &[u8], v2: &[u8]) -> bool {
+    for (i, v) in v1.iter().enumerate() {
+        if v > &v2[i] {
+            return true;
+        }
+    }
+    return false;
 }
 
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
@@ -313,9 +341,9 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                 won_slots.push(slot);
                 local_won_slots.push(slot - first_slot_in_epoch);
             } else {
-                let winner_fractional = vrf_output_to_fractional(&winner_for_slot.vrf)?;
-                let our_fractional = delegator_details.vrf_output_fractional;
-                if our_fractional > winner_fractional {
+                let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
+                let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                if compare_vrfs(&our_digest, &winner_digest) {
                     missed_slots.push(slot);
                     local_missed_slots.push(slot - first_slot_in_epoch);
                 } else {
