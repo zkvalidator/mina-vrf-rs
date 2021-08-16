@@ -1,7 +1,12 @@
 #![allow(clippy::enum_variant_names)]
 
 use anyhow::{anyhow, Result};
+use bigdecimal::{BigDecimal, ToPrimitive};
+use blake2b_simd::Params;
+use chrono::Duration;
 use clap::Clap;
+use mina_graphql_rs::*;
+use num_bigint::{BigInt, Sign};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,10 +14,7 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::str::FromStr;
 
-use bigdecimal::{BigDecimal, ToPrimitive};
-use blake2b_simd::Params;
-use mina_graphql_rs::*;
-use num_bigint::{BigInt, Sign};
+const SLOT_TIME_MINUTES: i64 = 3;
 
 /// mina-vrf-rs client
 #[derive(Clap)]
@@ -110,8 +112,8 @@ pub struct CheckWitnessOutput {
     pub local_won_slots: Vec<usize>,
     pub lost_slots: Vec<usize>,
     pub local_lost_slots: Vec<usize>,
-    pub missed_slots: Vec<usize>,
-    pub local_missed_slots: Vec<usize>,
+    pub missed_slots: Vec<(usize, MissedBlockReason)>,
+    pub local_missed_slots: Vec<(usize, MissedBlockReason)>,
 }
 
 fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
@@ -120,6 +122,14 @@ fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
     } else {
         Ok(Box::new(BufWriter::new(File::create(path)?)))
     };
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum MissedBlockReason {
+    NotProducedOrPropagated,
+    PropagatedTooLate(String, String),
+    HeightTooOld(i64, i64),
+    Unknown,
 }
 
 #[tokio::main]
@@ -342,8 +352,9 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             let delegator_public_key =
                 &delegators_index_to_public_key[&delegator_details.message.delegator_index];
             if !winners_for_epoch.contains_key(&(slot as i64)) {
-                missed_slots.push(slot);
-                local_missed_slots.push(slot - first_slot_in_epoch);
+                let reason = MissedBlockReason::NotProducedOrPropagated;
+                missed_slots.push((slot, reason.clone()));
+                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
                 continue;
             }
             let winner_for_slot = &winners_for_epoch[&(slot as i64)];
@@ -354,14 +365,31 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                 && blocks_for_creator_for_epoch[&(slot as i64)].block_height
                     < winner_for_slot.block_height
             {
-                missed_slots.push(slot);
-                local_missed_slots.push(slot - first_slot_in_epoch);
+                let reason = MissedBlockReason::HeightTooOld(
+                    blocks_for_creator_for_epoch[&(slot as i64)].block_height,
+                    winner_for_slot.block_height,
+                );
+                missed_slots.push((slot, reason.clone()));
+                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
             } else {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
                 if compare_vrfs(&our_digest, &winner_digest) {
-                    missed_slots.push(slot);
-                    local_missed_slots.push(slot - first_slot_in_epoch);
+                    let reason = if blocks_for_creator_for_epoch.contains_key(&(slot as i64))
+                        && blocks_for_creator_for_epoch[&(slot as i64)].received_time
+                            > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
+                                + Duration::minutes(SLOT_TIME_MINUTES))
+                    {
+                        let block_creator = &blocks_for_creator_for_epoch[&(slot as i64)];
+                        MissedBlockReason::PropagatedTooLate(
+                            block_creator.date_time.to_rfc3339(),
+                            block_creator.received_time.to_rfc3339(),
+                        )
+                    } else {
+                        MissedBlockReason::Unknown
+                    };
+                    missed_slots.push((slot, reason.clone()));
+                    local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
                 } else {
                     lost_slots.push(slot);
                     local_lost_slots.push(slot - first_slot_in_epoch);
