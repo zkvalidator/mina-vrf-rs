@@ -726,7 +726,7 @@ checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 [[package]]
 name = "mina-graphql-rs"
 version = "0.1.0"
-source = "git+https://github.com/HAOYUatHZ/mina-graphql-rs?branch=vrf#ffdbc30429b4d736a40ac2fa28ed4555592b8159"
+source = "git+https://github.com/zkvalidator/mina-graphql-rs?branch=main#f1474f03c44b9c1b94fadadf41d67f6fb71d4d69"
 dependencies = [
  "anyhow",
  "chrono",
