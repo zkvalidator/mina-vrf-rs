@@ -349,7 +349,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             } else {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
-                if compare_vrfs(&winner_digest, &our_digest) {
+                if compare_vrfs(&our_digest, &winner_digest) {
                     missed_slots.push(slot);
                     local_missed_slots.push(slot - first_slot_in_epoch);
                 } else {
