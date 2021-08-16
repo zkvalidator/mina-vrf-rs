@@ -276,6 +276,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let iterator = deserializer.into_iter::<BatchCheckWitnessSingleRequest>();
     let mut slot_to_vrf_results: HashMap<String, Vec<_>> = HashMap::new();
     let winners_for_epoch = get_winners_for_epoch(opts.epoch).await?;
+    let blocks_for_creator_for_epoch =
+        get_blocks_for_creator_for_epoch(opts.epoch, &opts.pubkey).await?;
     for item in iterator {
         let e = item?;
         let slot = e.message.global_slot.clone();
@@ -348,6 +350,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             if &winner_for_slot.public_key == delegator_public_key {
                 won_slots.push(slot);
                 local_won_slots.push(slot - first_slot_in_epoch);
+            } else if blocks_for_creator_for_epoch.contains_key(&(slot as i64))
+                && blocks_for_creator_for_epoch[&(slot as i64)].block_height
+                    < winner_for_slot.block_height
+            {
+                missed_slots.push(slot);
+                local_missed_slots.push(slot - first_slot_in_epoch);
             } else {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
@@ -398,52 +406,4 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     f.flush()?;
 
     Ok(())
-}
-
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-struct WinnerResult {
-    pub vrf: String,
-    pub public_key: String,
-}
-
-async fn get_winners_for_epoch(epoch: usize) -> Result<HashMap<i64, WinnerResult>> {
-    let blocks = get_epoch_blocks_winners_from_explorer(epoch as i64).await?;
-    let mut winner_result: HashMap<i64, WinnerResult> = HashMap::new();
-
-    for b in blocks {
-        let consensus_state = b
-            .protocol_state
-            .as_ref()
-            .ok_or(anyhow!("no protocol state"))?
-            .consensus_state
-            .as_ref()
-            .ok_or(anyhow!("no consensus state"))?;
-        let slot = consensus_state
-            .slot_since_genesis
-            .ok_or(anyhow!("couldn't get global slot"))?;
-
-        let winner = b
-            .winner_account
-            .as_ref()
-            .ok_or(anyhow!("no winner_account"))?
-            .public_key
-            .as_ref()
-            .ok_or(anyhow!("winner_account no public_key"))?;
-
-        let vrf = consensus_state
-            .last_vrf_output
-            .as_ref()
-            .ok_or(anyhow!("no vrf"))?;
-
-        winner_result.insert(
-            slot,
-            WinnerResult {
-                public_key: winner.to_string(),
-                vrf: vrf.to_string(),
-            },
-        );
-    }
-
-    Ok(winner_result)
 }
