@@ -336,6 +336,11 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         if let Some(delegator_details) = first_threshold_met {
             let delegator_public_key =
                 &delegators_index_to_public_key[&delegator_details.message.delegator_index];
+            if !winners_for_epoch.contains_key(&(slot as i64)) {
+                missed_slots.push(slot);
+                local_missed_slots.push(slot - first_slot_in_epoch);
+                continue;
+            }
             let winner_for_slot = &winners_for_epoch[&(slot as i64)];
             if &winner_for_slot.public_key == delegator_public_key {
                 won_slots.push(slot);
