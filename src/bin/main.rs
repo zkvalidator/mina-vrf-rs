@@ -475,9 +475,12 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             local_won_slots.push(slot - first_slot_in_epoch);
             continue;
         }
-        ambiguous_slots.push((slot, results.clone()));
-        local_ambiguous_slots.push((slot - first_slot_in_epoch, results.clone()));
-        continue;
+
+        if results.len() > 0 {
+            ambiguous_slots.push((slot, results.clone()));
+            local_ambiguous_slots.push((slot - first_slot_in_epoch, results.clone()));
+            continue;
+        }
     }
 
     if invalid_slots.is_empty() {
