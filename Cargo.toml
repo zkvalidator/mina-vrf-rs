@@ -26,6 +26,7 @@ tokio = { version = "1.6.0", features = [ "full" ] }
 bs58 = { version = "0.4.0", features = [ "check" ] }
 blake2b_simd = "0.5.11"
 chrono = { version = "0.4", features = [ "serde" ] }
+futures = "0.3"
 
 [[bin]]
 name = "mina-vrf"

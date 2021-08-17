@@ -114,6 +114,8 @@ pub struct CheckWitnessOutput {
     pub local_lost_slots: Vec<usize>,
     pub missed_slots: Vec<(usize, MissedBlockReason)>,
     pub local_missed_slots: Vec<(usize, MissedBlockReason)>,
+    pub ambiguous_slots: Vec<(usize, Vec<SlotResult>)>,
+    pub local_ambiguous_slots: Vec<(usize, Vec<SlotResult>)>,
 }
 
 fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
@@ -124,7 +126,14 @@ fn open_buffered_file(path: &str) -> io::Result<Box<dyn Write>> {
     };
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum SlotResult {
+    Won,
+    Lost,
+    Missed(MissedBlockReason),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MissedBlockReason {
     NotProducedOrPropagated,
     PropagatedTooLate(String, String),
@@ -275,6 +284,87 @@ fn compare_vrfs(v1: &[u8], v2: &[u8]) -> bool {
     return false;
 }
 
+async fn analyze_slot(delegators_index_to_public_key: &HashMap<i64, String>, delegator_details: &BatchCheckWitnessSingleRequest, slot: i64, epoch: usize, public_key: &str) -> Result<SlotResult> {
+    let winners_for_epoch = get_winners_for_epoch(epoch).await?;
+    let blocks_for_creator_for_epoch =
+        get_blocks_for_creator_for_epoch(epoch, public_key).await?;
+    let delegator_public_key =
+        &delegators_index_to_public_key[&delegator_details.message.delegator_index];
+
+    let winners_exist = winners_for_epoch.contains_key(&slot);
+    let saw_my_producer = blocks_for_creator_for_epoch.contains_key(&slot);
+    if !winners_exist {
+        if !saw_my_producer {
+            let reason = MissedBlockReason::NotProducedOrPropagated;
+            return Ok(SlotResult::Missed(reason));
+        } else {
+            let late = blocks_for_creator_for_epoch[&slot].received_time
+                > (blocks_for_creator_for_epoch[&slot].date_time
+                + Duration::minutes(SLOT_TIME_MINUTES));
+            if late {
+                let my_producer_block = &blocks_for_creator_for_epoch[&slot];
+                let reason = MissedBlockReason::PropagatedTooLate(
+                    my_producer_block.date_time.to_rfc3339(),
+                    my_producer_block.received_time.to_rfc3339(),
+                );
+                return Ok(SlotResult::Missed(reason));
+            } else {
+                return Ok(SlotResult::Lost);
+            }
+        }
+    } else {
+
+        let winner_for_slot = &winners_for_epoch[&slot];
+        let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
+        if my_producer_is_the_winner {
+            return Ok(SlotResult::Won);
+        } else {
+            if saw_my_producer {
+                let my_producer_block = &blocks_for_creator_for_epoch[&slot];
+                let block_height_equal =
+                    my_producer_block.block_height == winner_for_slot.block_height;
+                if block_height_equal {
+                    let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
+                    let our_digest =
+                        vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                    if compare_vrfs(&our_digest, &winner_digest) {
+                        let late = blocks_for_creator_for_epoch[&slot]
+                            .received_time
+                            > (blocks_for_creator_for_epoch[&slot].date_time
+                            + Duration::minutes(SLOT_TIME_MINUTES));
+                        if late {
+                            let reason = MissedBlockReason::PropagatedTooLate(
+                                my_producer_block.date_time.to_rfc3339(),
+                                my_producer_block.received_time.to_rfc3339(),
+                            );
+                            return Ok(SlotResult::Missed(reason));
+                        } else {
+                            return Ok(SlotResult::Lost);
+                        }
+                    } else {
+                        return Ok(SlotResult::Lost);
+                    }
+                } else {
+                    let reason = MissedBlockReason::HeightTooOld(
+                        my_producer_block.block_height,
+                        winner_for_slot.block_height,
+                    );
+                    return Ok(SlotResult::Missed(reason));
+                }
+            } else {
+                let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
+                let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                if compare_vrfs(&our_digest, &winner_digest) {
+                    let reason = MissedBlockReason::NotProducedOrPropagated;
+                    return Ok(SlotResult::Missed(reason));
+                } else {
+                    return Ok(SlotResult::Lost);
+                }
+            }
+        }
+    }
+}
+
 async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let stdin = std::io::stdin();
     let stdin = stdin.lock();
@@ -284,9 +374,7 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let deserializer = serde_json::Deserializer::from_reader(stdin);
     let iterator = deserializer.into_iter::<BatchCheckWitnessSingleRequest>();
     let mut slot_to_vrf_results: HashMap<String, Vec<_>> = HashMap::new();
-    let winners_for_epoch = get_winners_for_epoch(opts.epoch).await?;
-    let blocks_for_creator_for_epoch =
-        get_blocks_for_creator_for_epoch(opts.epoch, &opts.pubkey).await?;
+
     for item in iterator {
         let e = item?;
         let slot = e.message.global_slot.clone();
@@ -325,6 +413,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let mut local_lost_slots = vec![];
     let mut missed_slots = vec![];
     let mut local_missed_slots = vec![];
+    let mut ambiguous_slots = vec![];
+    let mut local_ambiguous_slots = vec![];
     for slot in first_slot_in_epoch..=last_slot_in_epoch {
         if !slot_to_vrf_results.contains_key(&slot.to_string()) {
             invalid_slots.push(slot);
@@ -346,108 +436,36 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
         }
-        let first_threshold_met = vrf_results.iter().find(|v| v.threshold_met);
-        if let Some(delegator_details) = first_threshold_met {
-            let delegator_public_key =
-                &delegators_index_to_public_key[&delegator_details.message.delegator_index];
-
-            let winners_exist = winners_for_epoch.contains_key(&(slot as i64));
-            let saw_my_producer = blocks_for_creator_for_epoch.contains_key(&(slot as i64));
-            if !winners_exist {
-                if !saw_my_producer {
-                    let reason = MissedBlockReason::NotProducedOrPropagated;
-                    missed_slots.push((slot, reason.clone()));
-                    local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                    continue;
-                } else {
-                    let late = blocks_for_creator_for_epoch[&(slot as i64)].received_time
-                        > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
-                            + Duration::minutes(SLOT_TIME_MINUTES));
-                    if late {
-                        let my_producer_block = &blocks_for_creator_for_epoch[&(slot as i64)];
-                        let reason = MissedBlockReason::PropagatedTooLate(
-                            my_producer_block.date_time.to_rfc3339(),
-                            my_producer_block.received_time.to_rfc3339(),
-                        );
-                        missed_slots.push((slot, reason.clone()));
-                        local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                        continue;
-                    } else {
-                        lost_slots.push(slot);
-                        local_lost_slots.push(slot - first_slot_in_epoch);
-                        continue;
-                    }
-                }
-            } else {
-
-                let winner_for_slot = &winners_for_epoch[&(slot as i64)];
-                let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
-                if slot == 71152 {
-                    println!("debug: {}, {}", &winner_for_slot.public_key, delegator_public_key);
-                }
-                if my_producer_is_the_winner {
+        let results = vrf_results.iter().filter(|v| v.threshold_met).map(|delegator_details| {
+            analyze_slot(&delegators_index_to_public_key, delegator_details, slot as i64, opts.epoch, &opts.pubkey)
+        }).collect::<Vec<_>>();
+        let results = futures::future::try_join_all(results).await?;
+        if results.len() > 0 && results.iter().all(|r| r == &results[0]) {
+            let result = &results[0];
+            match result {
+                SlotResult::Won => {
                     won_slots.push(slot);
                     local_won_slots.push(slot - first_slot_in_epoch);
-                    continue;
-                } else {
-                    if saw_my_producer {
-                        let my_producer_block = &blocks_for_creator_for_epoch[&(slot as i64)];
-                        let block_height_equal =
-                            my_producer_block.block_height == winner_for_slot.block_height;
-                        if block_height_equal {
-                            let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
-                            let our_digest =
-                                vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
-                            if compare_vrfs(&our_digest, &winner_digest) {
-                                let late = blocks_for_creator_for_epoch[&(slot as i64)]
-                                    .received_time
-                                    > (blocks_for_creator_for_epoch[&(slot as i64)].date_time
-                                        + Duration::minutes(SLOT_TIME_MINUTES));
-                                if late {
-                                    let reason = MissedBlockReason::PropagatedTooLate(
-                                        my_producer_block.date_time.to_rfc3339(),
-                                        my_producer_block.received_time.to_rfc3339(),
-                                    );
-                                    missed_slots.push((slot, reason.clone()));
-                                    local_missed_slots
-                                        .push((slot - first_slot_in_epoch, reason.clone()));
-                                    continue;
-                                } else {
-                                    lost_slots.push(slot);
-                                    local_lost_slots.push(slot - first_slot_in_epoch);
-                                    continue;
-                                }
-                            } else {
-                                lost_slots.push(slot);
-                                local_lost_slots.push(slot - first_slot_in_epoch);
-                                continue;
-                            }
-                        } else {
-                            let reason = MissedBlockReason::HeightTooOld(
-                                my_producer_block.block_height,
-                                winner_for_slot.block_height,
-                            );
-                            missed_slots.push((slot, reason.clone()));
-                            local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                            continue;
-                        }
-                    } else {
-                        let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
-                        let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
-                        if compare_vrfs(&our_digest, &winner_digest) {
-                            let reason = MissedBlockReason::NotProducedOrPropagated;
-                            missed_slots.push((slot, reason.clone()));
-                            local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                            continue;
-                        } else {
-                            lost_slots.push(slot);
-                            local_lost_slots.push(slot - first_slot_in_epoch);
-                            continue;
-                        }
-                    }
+                }
+                SlotResult::Lost => {
+                    lost_slots.push(slot);
+                    local_lost_slots.push(slot - first_slot_in_epoch);
+                }
+                SlotResult::Missed(reason) => {
+                    missed_slots.push((slot, reason.clone()));
+                    local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
                 }
             }
+            continue;
         }
+        if results.iter().any(|r| r == &SlotResult::Won) {
+            won_slots.push(slot);
+            local_won_slots.push(slot - first_slot_in_epoch);
+            continue;
+        }
+        ambiguous_slots.push((slot, results.clone()));
+        local_ambiguous_slots.push((slot - first_slot_in_epoch, results.clone()));
+        continue;
     }
 
     if invalid_slots.is_empty() {
@@ -468,6 +486,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     log::info!("lost local slots: {:?}", local_lost_slots);
     log::info!("missed slots: {:?}", missed_slots);
     log::info!("missed local slots: {:?}", local_missed_slots);
+    log::info!("ambiguous slots: {:?}", ambiguous_slots);
+    log::info!("ambiguous local slots: {:?}", local_ambiguous_slots);
 
     let result = CheckWitnessOutput {
         producing_slots,
@@ -480,6 +500,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
         local_lost_slots,
         missed_slots,
         local_missed_slots,
+        ambiguous_slots,
+        local_ambiguous_slots,
     };
     let mut f = open_buffered_file(&opts.out_file)?;
     f.write_all(serde_json::to_string(&result)?.as_bytes())?;
