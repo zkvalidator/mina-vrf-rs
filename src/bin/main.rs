@@ -284,10 +284,15 @@ fn compare_vrfs(v1: &[u8], v2: &[u8]) -> bool {
     return false;
 }
 
-async fn analyze_slot(delegators_index_to_public_key: &HashMap<i64, String>, delegator_details: &BatchCheckWitnessSingleRequest, slot: i64, epoch: usize, public_key: &str) -> Result<SlotResult> {
+async fn analyze_slot(
+    delegators_index_to_public_key: &HashMap<i64, String>,
+    delegator_details: &BatchCheckWitnessSingleRequest,
+    slot: i64,
+    epoch: usize,
+    public_key: &str,
+) -> Result<SlotResult> {
     let winners_for_epoch = get_winners_for_epoch(epoch).await?;
-    let blocks_for_creator_for_epoch =
-        get_blocks_for_creator_for_epoch(epoch, public_key).await?;
+    let blocks_for_creator_for_epoch = get_blocks_for_creator_for_epoch(epoch, public_key).await?;
     let delegator_public_key =
         &delegators_index_to_public_key[&delegator_details.message.delegator_index];
 
@@ -300,7 +305,7 @@ async fn analyze_slot(delegators_index_to_public_key: &HashMap<i64, String>, del
         } else {
             let late = blocks_for_creator_for_epoch[&slot].received_time
                 > (blocks_for_creator_for_epoch[&slot].date_time
-                + Duration::minutes(SLOT_TIME_MINUTES));
+                    + Duration::minutes(SLOT_TIME_MINUTES));
             if late {
                 let my_producer_block = &blocks_for_creator_for_epoch[&slot];
                 let reason = MissedBlockReason::PropagatedTooLate(
@@ -313,7 +318,6 @@ async fn analyze_slot(delegators_index_to_public_key: &HashMap<i64, String>, del
             }
         }
     } else {
-
         let winner_for_slot = &winners_for_epoch[&slot];
         let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
         if my_producer_is_the_winner {
@@ -325,13 +329,11 @@ async fn analyze_slot(delegators_index_to_public_key: &HashMap<i64, String>, del
                     my_producer_block.block_height == winner_for_slot.block_height;
                 if block_height_equal {
                     let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
-                    let our_digest =
-                        vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
+                    let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
                     if compare_vrfs(&our_digest, &winner_digest) {
-                        let late = blocks_for_creator_for_epoch[&slot]
-                            .received_time
+                        let late = blocks_for_creator_for_epoch[&slot].received_time
                             > (blocks_for_creator_for_epoch[&slot].date_time
-                            + Duration::minutes(SLOT_TIME_MINUTES));
+                                + Duration::minutes(SLOT_TIME_MINUTES));
                         if late {
                             let reason = MissedBlockReason::PropagatedTooLate(
                                 my_producer_block.date_time.to_rfc3339(),
@@ -436,9 +438,19 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             local_invalid_slots.push(slot - first_slot_in_epoch);
             continue;
         }
-        let results = vrf_results.iter().filter(|v| v.threshold_met).map(|delegator_details| {
-            analyze_slot(&delegators_index_to_public_key, delegator_details, slot as i64, opts.epoch, &opts.pubkey)
-        }).collect::<Vec<_>>();
+        let results = vrf_results
+            .iter()
+            .filter(|v| v.threshold_met)
+            .map(|delegator_details| {
+                analyze_slot(
+                    &delegators_index_to_public_key,
+                    delegator_details,
+                    slot as i64,
+                    opts.epoch,
+                    &opts.pubkey,
+                )
+            })
+            .collect::<Vec<_>>();
         let results = futures::future::try_join_all(results).await?;
         if results.len() > 0 && results.iter().all(|r| r == &results[0]) {
             let result = &results[0];
