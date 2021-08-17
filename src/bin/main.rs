@@ -288,11 +288,9 @@ async fn analyze_slot(
     delegators_index_to_public_key: &HashMap<i64, String>,
     delegator_details: &BatchCheckWitnessSingleRequest,
     slot: i64,
-    epoch: usize,
-    public_key: &str,
+    winners_for_epoch: &HashMap<i64, BlockResult>,
+    blocks_for_creator_for_epoch: &HashMap<i64, BlockResult>,
 ) -> Result<SlotResult> {
-    let winners_for_epoch = get_winners_for_epoch(epoch).await?;
-    let blocks_for_creator_for_epoch = get_blocks_for_creator_for_epoch(epoch, public_key).await?;
     let delegator_public_key =
         &delegators_index_to_public_key[&delegator_details.message.delegator_index];
 
@@ -417,6 +415,11 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
     let mut local_missed_slots = vec![];
     let mut ambiguous_slots = vec![];
     let mut local_ambiguous_slots = vec![];
+
+    let winners_for_epoch = get_winners_for_epoch(opts.epoch).await?;
+    let blocks_for_creator_for_epoch =
+        get_blocks_for_creator_for_epoch(opts.epoch, &opts.pubkey).await?;
+
     for slot in first_slot_in_epoch..=last_slot_in_epoch {
         if !slot_to_vrf_results.contains_key(&slot.to_string()) {
             invalid_slots.push(slot);
@@ -446,8 +449,8 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
                     &delegators_index_to_public_key,
                     delegator_details,
                     slot as i64,
-                    opts.epoch,
-                    &opts.pubkey,
+                    &winners_for_epoch,
+                    &blocks_for_creator_for_epoch,
                 )
             })
             .collect::<Vec<_>>();
