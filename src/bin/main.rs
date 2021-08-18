@@ -134,6 +134,12 @@ pub enum SlotResult {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SlotAnalysis {
+    pub slot_result: SlotResult,
+    pub saw_my_producer_and_same_delegator: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum MissedBlockReason {
     NotProducedOrPropagated,
     PropagatedTooLate(String, String),
@@ -290,7 +296,7 @@ async fn analyze_slot(
     slot: i64,
     winners_for_epoch: &HashMap<i64, BlockResult>,
     blocks_for_creator_for_epoch: &HashMap<i64, BlockResult>,
-) -> Result<SlotResult> {
+) -> Result<SlotAnalysis> {
     let delegator_public_key =
         &delegators_index_to_public_key[&delegator_details.message.delegator_index];
 
@@ -299,27 +305,41 @@ async fn analyze_slot(
     if !winners_exist {
         if !saw_my_producer {
             let reason = MissedBlockReason::NotProducedOrPropagated;
-            return Ok(SlotResult::Missed(reason));
+            return Ok(SlotAnalysis {
+                slot_result: SlotResult::Missed(reason),
+                saw_my_producer_and_same_delegator: false,
+            });
         } else {
             let late = blocks_for_creator_for_epoch[&slot].received_time
                 > (blocks_for_creator_for_epoch[&slot].date_time
                     + Duration::minutes(SLOT_TIME_MINUTES));
+            let my_producer_block = &blocks_for_creator_for_epoch[&slot];
             if late {
-                let my_producer_block = &blocks_for_creator_for_epoch[&slot];
                 let reason = MissedBlockReason::PropagatedTooLate(
                     my_producer_block.date_time.to_rfc3339(),
                     my_producer_block.received_time.to_rfc3339(),
                 );
-                return Ok(SlotResult::Missed(reason));
+                return Ok(SlotAnalysis {
+                    slot_result: SlotResult::Missed(reason),
+                    saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                        == delegator_public_key,
+                });
             } else {
-                return Ok(SlotResult::Lost);
+                return Ok(SlotAnalysis {
+                    slot_result: SlotResult::Lost,
+                    saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                        == delegator_public_key,
+                });
             }
         }
     } else {
         let winner_for_slot = &winners_for_epoch[&slot];
         let my_producer_is_the_winner = &winner_for_slot.public_key == delegator_public_key;
         if my_producer_is_the_winner {
-            return Ok(SlotResult::Won);
+            return Ok(SlotAnalysis {
+                slot_result: SlotResult::Won,
+                saw_my_producer_and_same_delegator: true,
+            });
         } else {
             if saw_my_producer {
                 let my_producer_block = &blocks_for_creator_for_epoch[&slot];
@@ -337,28 +357,50 @@ async fn analyze_slot(
                                 my_producer_block.date_time.to_rfc3339(),
                                 my_producer_block.received_time.to_rfc3339(),
                             );
-                            return Ok(SlotResult::Missed(reason));
+                            return Ok(SlotAnalysis {
+                                slot_result: SlotResult::Missed(reason),
+                                saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                                    == delegator_public_key,
+                            });
                         } else {
-                            return Ok(SlotResult::Lost);
+                            return Ok(SlotAnalysis {
+                                slot_result: SlotResult::Lost,
+                                saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                                    == delegator_public_key,
+                            });
                         }
                     } else {
-                        return Ok(SlotResult::Lost);
+                        return Ok(SlotAnalysis {
+                            slot_result: SlotResult::Lost,
+                            saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                                == delegator_public_key,
+                        });
                     }
                 } else {
                     let reason = MissedBlockReason::HeightTooOld(
                         my_producer_block.block_height,
                         winner_for_slot.block_height,
                     );
-                    return Ok(SlotResult::Missed(reason));
+                    return Ok(SlotAnalysis {
+                        slot_result: SlotResult::Missed(reason),
+                        saw_my_producer_and_same_delegator: &my_producer_block.public_key
+                            == delegator_public_key,
+                    });
                 }
             } else {
                 let winner_digest = vrf_output_to_digest_bytes(&winner_for_slot.vrf)?;
                 let our_digest = vrf_output_to_digest_bytes(&delegator_details.vrf_output)?;
                 if compare_vrfs(&our_digest, &winner_digest) {
                     let reason = MissedBlockReason::NotProducedOrPropagated;
-                    return Ok(SlotResult::Missed(reason));
+                    return Ok(SlotAnalysis {
+                        slot_result: SlotResult::Missed(reason),
+                        saw_my_producer_and_same_delegator: false,
+                    });
                 } else {
-                    return Ok(SlotResult::Lost);
+                    return Ok(SlotAnalysis {
+                        slot_result: SlotResult::Lost,
+                        saw_my_producer_and_same_delegator: false,
+                    });
                 }
             }
         }
@@ -455,33 +497,47 @@ async fn batch_check_witness(opts: VRFOpts) -> Result<()> {
             })
             .collect::<Vec<_>>();
         let results = futures::future::try_join_all(results).await?;
+        let mut process_single_result = |result: &SlotAnalysis| match &result.slot_result {
+            SlotResult::Won => {
+                won_slots.push(slot);
+                local_won_slots.push(slot - first_slot_in_epoch);
+            }
+            SlotResult::Lost => {
+                lost_slots.push(slot);
+                local_lost_slots.push(slot - first_slot_in_epoch);
+            }
+            SlotResult::Missed(reason) => {
+                missed_slots.push((slot, reason.clone()));
+                local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
+            }
+        };
         if results.len() > 0 && results.iter().all(|r| r == &results[0]) {
             let result = &results[0];
-            match result {
-                SlotResult::Won => {
-                    won_slots.push(slot);
-                    local_won_slots.push(slot - first_slot_in_epoch);
-                }
-                SlotResult::Lost => {
-                    lost_slots.push(slot);
-                    local_lost_slots.push(slot - first_slot_in_epoch);
-                }
-                SlotResult::Missed(reason) => {
-                    missed_slots.push((slot, reason.clone()));
-                    local_missed_slots.push((slot - first_slot_in_epoch, reason.clone()));
-                }
-            }
+            process_single_result(result);
             continue;
         }
-        if results.iter().any(|r| r == &SlotResult::Won) {
+        if let Some(result) = results
+            .iter()
+            .find(|r| r.saw_my_producer_and_same_delegator)
+        {
+            process_single_result(result);
+            continue;
+        }
+        if results.iter().any(|r| r.slot_result == SlotResult::Won) {
             won_slots.push(slot);
             local_won_slots.push(slot - first_slot_in_epoch);
             continue;
         }
 
         if results.len() > 0 {
-            ambiguous_slots.push((slot, results.clone()));
-            local_ambiguous_slots.push((slot - first_slot_in_epoch, results.clone()));
+            ambiguous_slots.push((
+                slot,
+                results.iter().cloned().map(|r| r.slot_result).collect(),
+            ));
+            local_ambiguous_slots.push((
+                slot - first_slot_in_epoch,
+                results.iter().cloned().map(|r| r.slot_result).collect(),
+            ));
             continue;
         }
     }
