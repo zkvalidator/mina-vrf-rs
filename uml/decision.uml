@@ -1,0 +1,50 @@
+@startuml
+!theme kobi from https://raw.githubusercontent.com/kobigurk/uml/master
+if (winners) is (<U+003D>0) then
+  if (saw my producer) is (yes) then
+    if (late) is (yes) then
+      #coral:too late;
+      detach
+    else (no)
+      #lightyellow:lost (reorg);
+      detach
+    endif
+  else (no)
+    #coral:not produced;
+    detach
+  endif
+else (>0)
+  if (my producer is the winner) is (yes) then
+    #lightgreen:won;
+    detach
+  else (no)
+    if (saw my producer) is (yes) then
+      if (block height) is (old) then
+        #coral:block height too old;
+        detach
+      else (equal)
+        if (VRF) is (better) then
+          if (late) is (yes) then
+            #coral:too late;
+            detach
+          else (no)
+            #lightyellow:lost (reorg);
+            detach
+          endif
+        else (worse)
+          #lightyellow:lost;
+          detach
+        endif
+      endif
+    else (no)
+      if (VRF) is (better) then
+        #coral:not produced;
+        detach
+      else (worse)
+        #lightyellow:lost;
+        detach
+      endif
+    endif
+  endif
+endif
+@enduml
